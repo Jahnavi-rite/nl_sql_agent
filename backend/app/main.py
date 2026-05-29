@@ -20,7 +20,9 @@ from app.api.health import router as health_router
 from app.api.sandbox import router as sandbox_router
 from app.api.validate import router as validate_router
 from app.core.config import settings
+from app.core.database import engine
 from app.core.logging import setup_logging
+from app.core.redis import redis_client
 
 # Initialize structured logging
 setup_logging(settings.LOG_LEVEL)
@@ -44,15 +46,30 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         env=settings.APP_ENV,
         port=settings.BACKEND_PORT,
     )
-    # TODO: Phase 1 — Initialize database connection pool
-    # TODO: Phase 1 — Initialize Redis connection
+
+    # Verify database connectivity
+    try:
+        import sqlalchemy
+
+        async with engine.connect() as conn:
+            await conn.execute(sqlalchemy.text("SELECT 1"))
+        logger.info("database_connected", url=settings.DATABASE_URL.split("@")[-1])
+    except Exception as exc:
+        logger.warning("database_unavailable", error=str(exc))
+
+    # Verify Redis connectivity
+    try:
+        await redis_client.ping()
+        logger.info("redis_connected", url=settings.REDIS_URL)
+    except Exception as exc:
+        logger.warning("redis_unavailable", error=str(exc))
 
     yield  # App is running
 
     # --- Shutdown ---
+    await engine.dispose()
+    await redis_client.aclose()
     logger.info("app_shutting_down")
-    # TODO: Phase 1 — Close database connections
-    # TODO: Phase 1 — Close Redis connection
 
 
 # Create the FastAPI application
