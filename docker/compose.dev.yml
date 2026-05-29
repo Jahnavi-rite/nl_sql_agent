@@ -1,0 +1,125 @@
+# =============================================================================
+# Docker Compose — Development Environment
+# =============================================================================
+# Starts all services for local development.
+# Usage: docker compose -f docker/compose.dev.yml up -d --build
+#
+# Services:
+#   - postgres:  PostgreSQL 16 database
+#   - redis:     Redis 7 cache
+#   - backend:   FastAPI application
+#   - frontend:  Next.js application
+
+services:
+  # ---------------------------------------------------------------------------
+  # PostgreSQL — Primary database
+  # ---------------------------------------------------------------------------
+  postgres:
+    image: postgres:16-alpine
+    container_name: nlsql-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-nlsql}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-nlsql_dev_password}
+      POSTGRES_DB: ${POSTGRES_DB:-nlsql_agent}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./seeds:/docker-entrypoint-initdb.d  # Auto-run seed SQL files
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-nlsql} -d ${POSTGRES_DB:-nlsql_agent}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - nlsql-network
+
+  # ---------------------------------------------------------------------------
+  # Redis — Cache and session store
+  # ---------------------------------------------------------------------------
+  redis:
+    image: redis:7-alpine
+    container_name: nlsql-redis
+    restart: unless-stopped
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - nlsql-network
+
+  # ---------------------------------------------------------------------------
+  # Backend — FastAPI application
+  # ---------------------------------------------------------------------------
+  backend:
+    build:
+      context: ../backend
+      dockerfile: Dockerfile
+    container_name: nlsql-backend
+    restart: unless-stopped
+    env_file:
+      - ../.env
+    environment:
+      POSTGRES_HOST: postgres
+      REDIS_HOST: redis
+      SANDBOX_ATTACH_CONTAINER: nlsql-backend
+    ports:
+      - "${BACKEND_PORT:-8000}:8000"
+    volumes:
+      - ../backend/app:/app/app  # Hot-reload: mount source code
+      - /var/run/docker.sock:/var/run/docker.sock  # Lets the sandbox manager create child DB containers
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    networks:
+      - nlsql-network
+
+  # ---------------------------------------------------------------------------
+  # Frontend — Next.js application
+  # ---------------------------------------------------------------------------
+  frontend:
+    build:
+      context: ../frontend
+      dockerfile: Dockerfile
+    container_name: nlsql-frontend
+    restart: unless-stopped
+    environment:
+      NEXT_PUBLIC_API_URL: http://localhost:8000
+    ports:
+      - "${FRONTEND_PORT:-3000}:3000"
+    volumes:
+      - ../frontend/app:/app/app          # Hot-reload
+      - ../frontend/components:/app/components
+      - ../frontend/lib:/app/lib
+    depends_on:
+      backend:
+        condition: service_healthy
+    networks:
+      - nlsql-network
+
+# ---------------------------------------------------------------------------
+# Volumes — Persist data between container restarts
+# ---------------------------------------------------------------------------
+volumes:
+  postgres_data:
+  redis_data:
+
+# ---------------------------------------------------------------------------
+# Network — All services communicate on this network
+# ---------------------------------------------------------------------------
+networks:
+  nlsql-network:
+    driver: bridge

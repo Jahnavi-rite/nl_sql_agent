@@ -1,0 +1,78 @@
+[project]
+name = "nl-sql-agent"
+version = "0.1.0"
+description = "AI-powered SQL agent — Phase 0 foundation"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi>=0.110,<1",
+    "uvicorn[standard]>=0.29,<1",
+    "pydantic>=2.6,<3",
+    "pydantic-settings>=2.2,<3",
+    "structlog>=24.1,<25",
+    "httpx>=0.27,<1",
+    "asyncpg>=0.29,<1",
+    "redis>=5.0,<6",
+    "python-dotenv>=1.0,<2",
+    "docker>=7.1.0",
+    "oracledb>=4.0.1",
+    "sqlglot>=26,<27",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0,<9",
+    "pytest-asyncio>=0.23,<1",
+    "httpx>=0.27,<1",
+    "ruff>=0.4,<1",
+    "mypy>=1.9,<2",
+]
+
+# ---------------------------------------------------------------------------
+# Ruff — Fast Python linter & formatter
+# ---------------------------------------------------------------------------
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+
+[tool.ruff.lint]
+select = [
+    "E",    # pycodestyle errors
+    "W",    # pycodestyle warnings
+    "F",    # pyflakes
+    "I",    # isort (import sorting)
+    "N",    # pep8-naming
+    "UP",   # pyupgrade
+    "B",    # flake8-bugbear
+    "SIM",  # flake8-simplify
+]
+ignore = [
+    "E501",   # line length handled by formatter
+    "N802",   # allow uppercase property names (e.g., DATABASE_URL)
+]
+
+[tool.ruff.lint.isort]
+known-first-party = ["app"]
+
+# ---------------------------------------------------------------------------
+# Mypy — Static type checker
+# ---------------------------------------------------------------------------
+[tool.mypy]
+python_version = "3.11"
+strict = true
+warn_return_any = true
+warn_unused_configs = true
+plugins = ["pydantic.mypy"]
+
+[[tool.mypy.overrides]]
+module = ["structlog.*", "asyncpg.*", "redis.*", "sqlglot.*"]
+ignore_missing_imports = true
+
+# ---------------------------------------------------------------------------
+# Pytest
+# ---------------------------------------------------------------------------
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+markers = [
+    "integration: tests that require Docker and start real database containers",
+]

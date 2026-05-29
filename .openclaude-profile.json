@@ -1,0 +1,9 @@
+{
+  "profile": "anthropic",
+  "env": {
+    "ANTHROPIC_BASE_URL": "https://api.anthropic.com",
+    "ANTHROPIC_MODEL": "claude-sonnet-4-6",
+    "ANTHROPIC_API_KEY": "ogw_live_b124395756bf3c2d9f8571059cb2fbab"
+  },
+  "createdAt": "2026-05-28T11:20:09.927Z"
+}

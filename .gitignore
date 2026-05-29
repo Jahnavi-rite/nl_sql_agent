@@ -1,0 +1,52 @@
+# =============================================================================
+# Git Ignore — NL SQL Agent
+# =============================================================================
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+.eggs/
+*.egg
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+htmlcov/
+.coverage
+.coverage.*
+
+# --- Virtual environments ---
+.venv/
+venv/
+env/
+
+# --- Node / Next.js ---
+node_modules/
+.next/
+out/
+.turbo/
+
+# --- Environment files ---
+.env
+.env.local
+.env.*.local
+
+# --- IDE ---
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# --- OS ---
+.DS_Store
+Thumbs.db
+
+# --- Docker ---
+docker/data/
+
+# --- Logs ---
+*.log
+logs/
