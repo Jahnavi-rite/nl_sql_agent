@@ -16,6 +16,9 @@ dependencies = [
     "docker>=7.1.0",
     "oracledb>=4.0.1",
     "sqlglot>=26,<27",
+    "sqlalchemy[asyncio]>=2.0,<3",
+    "alembic>=1.13,<2",
+    "redis[hiredis]>=5.0,<6",
 ]
 
 [project.optional-dependencies]
