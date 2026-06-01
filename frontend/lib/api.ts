@@ -164,3 +164,183 @@ export async function runSandboxSql(
     "SQL run failed",
   );
 }
+
+// ---------------------------------------------------------------------------
+// Schema API
+// ---------------------------------------------------------------------------
+
+export interface SchemaColumn {
+  name: string;
+  dtype: string;
+  nullable: boolean;
+}
+
+export interface SchemaTable {
+  table_name: string;
+  columns: SchemaColumn[];
+  row_count: number;
+}
+
+export interface SchemaResponse {
+  tables: SchemaTable[];
+  description: string;
+  ingested_at: string | null;
+}
+
+export async function getSchema(): Promise<SchemaResponse> {
+  return fetchJson<SchemaResponse>("/schema", {}, REQUEST_TIMEOUT_MS, "Fetch schema failed");
+}
+
+// ---------------------------------------------------------------------------
+// Dataset API
+// ---------------------------------------------------------------------------
+
+export interface ColumnMetadata {
+  name: string;
+  dtype: string;
+  nullable: boolean;
+}
+
+export interface DatasetUploadResponse {
+  dataset_id: string;
+  session_id: string;
+  filename: string;
+  table_name: string;
+  columns: ColumnMetadata[];
+  row_count: number;
+  status: string;
+  suggested_prompts: string[];
+  created_at: string | null;
+}
+
+export interface DatasetInfo {
+  dataset_id: string;
+  filename: string;
+  table_name: string;
+  dialect: string;
+  columns: ColumnMetadata[];
+  row_count: number | null;
+  status: string;
+  suggested_prompts: string[];
+  created_at: string | null;
+}
+
+export async function uploadDataset(
+  sessionId: string,
+  file: File,
+  dialect: SandboxDialect,
+): Promise<DatasetUploadResponse> {
+  const formData = new FormData();
+  formData.append("file", file);
+  formData.append("dialect", dialect);
+
+  const response = await fetch(`${getApiUrl()}/sessions/${sessionId}/datasets`, {
+    method: "POST",
+    body: formData,
+  });
+
+  if (!response.ok) {
+    const detail = await readErrorDetail(response);
+    throw new Error(`Dataset upload failed: ${response.status} ${detail}`);
+  }
+
+  return response.json();
+}
+
+export async function listDatasets(
+  sessionId: string,
+): Promise<DatasetInfo[]> {
+  return fetchJson<DatasetInfo[]>(
+    `/sessions/${sessionId}/datasets`,
+    {},
+    REQUEST_TIMEOUT_MS,
+    "List datasets failed",
+  );
+}
+
+// ---------------------------------------------------------------------------
+// NL → SQL session/request API (Phase 4)
+// ---------------------------------------------------------------------------
+
+export interface CreateSessionResponse {
+  session_id: string;
+  dialect: string;
+  status: string;
+  created_at: string;
+}
+
+export interface CreateNLResponse {
+  request_id: string;
+  session_id: string;
+  question: string;
+  query_sql: string;
+  confidence: number | null;
+  rationale: string | null;
+  execution_results: Record<string, unknown>[];
+  execution_rows: number;
+  execution_ms: number | null;
+  status: string;
+  error_message: string | null;
+  created_at: string | null;
+}
+
+export interface GetRequestResponse {
+  request_id: string;
+  session_id: string;
+  question: string;
+  generated_sql: string;
+  confidence: number | null;
+  rationale: string | null;
+  execution_results: Record<string, unknown>[] | null;
+  execution_rows: number | null;
+  execution_ms: number | null;
+  status: string;
+  error_message: string | null;
+  created_at: string | null;
+}
+
+const NL_TIMEOUT_MS = 180_000;
+
+export async function createSession(
+  dialect: SandboxDialect,
+): Promise<CreateSessionResponse> {
+  return fetchJson<CreateSessionResponse>(
+    "/sessions",
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ dialect }),
+    },
+    10_000,
+    "Session creation failed",
+  );
+}
+
+export async function submitNLRequest(
+  sessionId: string,
+  prompt: string,
+  dialect: SandboxDialect,
+): Promise<CreateNLResponse> {
+  return fetchJson<CreateNLResponse>(
+    `/sessions/${sessionId}/requests`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ prompt, dialect }),
+    },
+    NL_TIMEOUT_MS,
+    "NL request failed",
+  );
+}
+
+export async function getRequestDetails(
+  sessionId: string,
+  requestId: string,
+): Promise<GetRequestResponse> {
+  return fetchJson<GetRequestResponse>(
+    `/sessions/${sessionId}/requests/${requestId}`,
+    {},
+    10_000,
+    "Fetch request details failed",
+  );
+}

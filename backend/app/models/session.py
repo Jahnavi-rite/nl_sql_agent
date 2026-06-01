@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime
+from typing import Any
 
 from sqlalchemy import (
     DateTime,
@@ -11,6 +12,7 @@ from sqlalchemy import (
     ForeignKey,
     Index,
     Integer,
+    LargeBinary,
     String,
     Text,
 )
@@ -21,6 +23,7 @@ from app.models.enums import (
     Dialect,
     FeedbackAction,
     IterationStatus,
+    RequestStatus,
     SessionStatus,
 )
 from app.models.types import JSONBCompat, UUIDCompat
@@ -44,12 +47,18 @@ class Session(UUIDMixin, TimestampMixin, Base):
     )
     sandbox_container_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
     sandbox_image: Mapped[str | None] = mapped_column(String(256), nullable=True)
-    metadata_json: Mapped[dict | None] = mapped_column(JSONBCompat, nullable=True)
+    metadata_json: Mapped[dict[str, Any] | None] = mapped_column(JSONBCompat, nullable=True)
     closed_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
 
     # --- relationships (cascade delete all children) ---
+    datasets: Mapped[list[Dataset]] = relationship(
+        back_populates="session",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+        order_by="Dataset.created_at",
+    )
     requests: Mapped[list[Request]] = relationship(
         back_populates="session",
         cascade="all, delete-orphan",
@@ -60,6 +69,9 @@ class Session(UUIDMixin, TimestampMixin, Base):
     __table_args__ = (
         Index("ix_sessions_user_status", "user_id", "status"),
     )
+
+
+MAX_ITERATIONS = 5
 
 
 class Request(UUIDMixin, TimestampMixin, Base):
@@ -74,7 +86,13 @@ class Request(UUIDMixin, TimestampMixin, Base):
         index=True,
     )
     question: Mapped[str] = mapped_column(Text, nullable=False)
-    context_json: Mapped[dict | None] = mapped_column(JSONBCompat, nullable=True)
+    context_json: Mapped[dict[str, Any] | None] = mapped_column(JSONBCompat, nullable=True)
+    status: Mapped[RequestStatus] = mapped_column(
+        String(30), nullable=False, default=RequestStatus.OPEN, index=True
+    )
+    approved_iteration_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUIDCompat(), nullable=True
+    )
 
     # --- relationships ---
     session: Mapped[Session] = relationship(back_populates="requests")
@@ -112,13 +130,16 @@ class Iteration(UUIDMixin, TimestampMixin, Base):
     )
     generated_sql: Mapped[str] = mapped_column(Text, nullable=False)
     redacted_sql: Mapped[str | None] = mapped_column(Text, nullable=True)
+    schema_ddl: Mapped[str | None] = mapped_column(Text, nullable=True)
+    seed_dml: Mapped[str | None] = mapped_column(Text, nullable=True)
+    execution_results: Mapped[list[dict[str, Any]] | None] = mapped_column(JSONBCompat, nullable=True)
     confidence: Mapped[float | None] = mapped_column(Float, nullable=True)
     rationale: Mapped[str | None] = mapped_column(Text, nullable=True)
     critic_score: Mapped[float | None] = mapped_column(Float, nullable=True)
     critic_notes: Mapped[str | None] = mapped_column(Text, nullable=True)
     validation_passed: Mapped[bool | None] = mapped_column(nullable=True)
-    validation_reasons: Mapped[list | None] = mapped_column(JSONBCompat, nullable=True)
-    explain_plan: Mapped[dict | None] = mapped_column(JSONBCompat, nullable=True)
+    validation_reasons: Mapped[list[str] | None] = mapped_column(JSONBCompat, nullable=True)
+    explain_plan: Mapped[dict[str, Any] | None] = mapped_column(JSONBCompat, nullable=True)
     execution_rows: Mapped[int | None] = mapped_column(Integer, nullable=True)
     execution_ms: Mapped[float | None] = mapped_column(Float, nullable=True)
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -167,6 +188,28 @@ class Feedback(UUIDMixin, TimestampMixin, Base):
     )
 
 
+class Dataset(UUIDMixin, TimestampMixin, Base):
+    """A user-uploaded dataset (CSV/Excel) associated with a session."""
+
+    __tablename__ = "datasets"
+
+    session_id: Mapped[uuid.UUID] = mapped_column(
+        UUIDCompat(),
+        ForeignKey("sessions.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    filename: Mapped[str] = mapped_column(String(256), nullable=False)
+    table_name: Mapped[str] = mapped_column(String(128), nullable=False)
+    dialect: Mapped[str] = mapped_column(String(20), nullable=False)
+    columns_json: Mapped[list[dict[str, Any]] | None] = mapped_column(JSONBCompat, nullable=True)
+    row_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    file_content: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="pending")
+
+    session: Mapped[Session] = relationship(back_populates="datasets")
+
+
 class AgentTrace(UUIDMixin, TimestampMixin, Base):
     """Audit log of every LLM call the agent makes.
 
@@ -189,7 +232,7 @@ class AgentTrace(UUIDMixin, TimestampMixin, Base):
     input_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
     output_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
     latency_ms: Mapped[float | None] = mapped_column(Float, nullable=True)
-    metadata_json: Mapped[dict | None] = mapped_column(JSONBCompat, nullable=True)
+    metadata_json: Mapped[dict[str, Any] | None] = mapped_column(JSONBCompat, nullable=True)
 
     # --- relationships ---
     iteration: Mapped[Iteration] = relationship(back_populates="traces")

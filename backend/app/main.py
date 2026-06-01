@@ -9,15 +9,26 @@ It sets up:
 - Lifespan events (startup/shutdown hooks for DB, Redis, etc.)
 """
 
+import asyncio
+import sys
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+
+# Windows + asyncpg fix: use SelectorEventLoop instead of ProactorEventLoop
+# to avoid "unexpected connection_lost() call" errors.
+if sys.platform == "win32":
+    asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
 import structlog
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from app.api.datasets import router as datasets_router
+from app.api.feedback import router as feedback_router
 from app.api.health import router as health_router
+from app.api.requests import router as requests_router
 from app.api.sandbox import router as sandbox_router
+from app.api.schema import router as schema_router
 from app.api.validate import router as validate_router
 from app.core.config import settings
 from app.core.database import engine
@@ -64,6 +75,36 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     except Exception as exc:
         logger.warning("redis_unavailable", error=str(exc))
 
+    # Auto-ingest CSV files into PostgreSQL and cache schema
+    try:
+        from app.services.startup_ingestion import find_csv_files, run_startup_ingestion
+
+        found = find_csv_files()
+        if found:
+            logger.info("startup_ingestion_starting", csv_files=found)
+        else:
+            logger.info("startup_no_csvs_to_ingest")
+
+        ingestion_result = await run_startup_ingestion()
+        csv_count = len(ingestion_result["csv_files"])
+        table_count = ingestion_result["schema_tables"]
+        logger.info(
+            "startup_ingestion_complete",
+            csv_files=csv_count,
+            tables_created=table_count,
+            ingested=[
+                {
+                    "table": i["table_name"],
+                    "rows": i["row_count"],
+                    "file": i.get("filename", ""),
+                }
+                for i in ingestion_result["ingested"]
+            ],
+        )
+    except Exception as exc:
+        logger.warning("startup_ingestion_error", error=str(exc))
+
+    logger.info("app_ready", path="/health", port=settings.BACKEND_PORT)
     yield  # App is running
 
     # --- Shutdown ---
@@ -97,6 +138,10 @@ app.add_middleware(
 # ---------------------------------------------------------------------------
 # Routes — Register all API routers
 # ---------------------------------------------------------------------------
+app.include_router(datasets_router)
+app.include_router(feedback_router)
 app.include_router(health_router)
 app.include_router(sandbox_router)
+app.include_router(schema_router)
 app.include_router(validate_router)
+app.include_router(requests_router)

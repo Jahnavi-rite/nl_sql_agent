@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from contextlib import suppress
 from typing import Any, Literal
 
 from app.sandbox.container import SandboxContainer
@@ -390,6 +391,9 @@ async def _wait_for_db(
                 retries,
                 exc,
             )
+        # Close connection before next attempt (ignore errors)
+        with suppress(Exception):
+            await executor.close()
         await asyncio.sleep(delay)
 
     raise RuntimeError(

@@ -77,31 +77,27 @@ class PostgresExecutor(DatabaseExecutor):
 
     async def execute(self, sql: str, timeout: int = DEFAULT_QUERY_TIMEOUT) -> list[dict[str, Any]]:
         assert self._conn is not None, "Not connected"
-        async with asyncio.timeout(timeout):
-            rows = await self._conn.fetch(sql)
+        rows = await asyncio.wait_for(self._conn.fetch(sql), timeout)
         if not rows:
             return []
         return [dict(row) for row in rows]
 
     async def execute_ddl(self, sql: str, timeout: int = DEFAULT_QUERY_TIMEOUT) -> None:
         assert self._conn is not None, "Not connected"
-        async with asyncio.timeout(timeout):
-            await self._conn.execute(sql)
-        logger.debug("DDL executed (%.80s…)", sql)
+        await asyncio.wait_for(self._conn.execute(sql), timeout)
+        logger.debug("DDL executed (%.80s\u2026)", sql)
 
     async def explain(self, sql: str, timeout: int = DEFAULT_QUERY_TIMEOUT) -> list[dict[str, Any]]:
         assert self._conn is not None, "Not connected"
         explained_sql = f"EXPLAIN (FORMAT JSON) {sql}"
-        async with asyncio.timeout(timeout):
-            rows = await self._conn.fetch(explained_sql)
+        rows = await asyncio.wait_for(self._conn.fetch(explained_sql), timeout)
         return [{"QUERY PLAN": row[0]} for row in rows]
 
     async def health(self) -> bool:
         if not self._conn or self._conn.is_closed():
             return False
         try:
-            async with asyncio.timeout(5):
-                await self._conn.fetch("SELECT 1")
+            await asyncio.wait_for(self._conn.fetch("SELECT 1"), 5)
             return True
         except Exception:
             return False
@@ -135,39 +131,37 @@ class OracleExecutor(DatabaseExecutor):
 
     async def execute(self, sql: str, timeout: int = DEFAULT_QUERY_TIMEOUT) -> list[dict[str, Any]]:
         assert self._conn is not None, "Not connected"
-        async with asyncio.timeout(timeout):
-            cursor = self._conn.cursor()
-            await cursor.execute(sql)
-            await self._conn.commit()
-            columns = [desc[0] for desc in cursor.description] if cursor.description else []
-            rows = await cursor.fetchall()
+        cursor = self._conn.cursor()
+        await asyncio.wait_for(cursor.execute(sql), timeout)
+        await asyncio.wait_for(self._conn.commit(), timeout)
+        columns = [desc[0] for desc in cursor.description] if cursor.description else []
+        rows = await asyncio.wait_for(cursor.fetchall(), timeout)
         return [dict(zip(columns, row, strict=False)) for row in rows]
 
     async def execute_ddl(self, sql: str, timeout: int = DEFAULT_QUERY_TIMEOUT) -> None:
         assert self._conn is not None, "Not connected"
-        async with asyncio.timeout(timeout):
-            cursor = self._conn.cursor()
-            await cursor.execute(sql)
-        logger.debug("DDL executed (%.80s…)", sql)
+        cursor = self._conn.cursor()
+        await asyncio.wait_for(cursor.execute(sql), timeout)
+        logger.debug("DDL executed (%.80s\u2026)", sql)
 
     async def explain(self, sql: str, timeout: int = DEFAULT_QUERY_TIMEOUT) -> list[dict[str, Any]]:
         """Oracle ``EXPLAIN PLAN FOR`` then ``DBMS_XPLAN.DISPLAY``."""
         assert self._conn is not None, "Not connected"
-        async with asyncio.timeout(timeout):
-            cursor = self._conn.cursor()
-            await cursor.execute(f"EXPLAIN PLAN FOR {sql}")
-            await cursor.execute("SELECT * FROM TABLE(DBMS_XPLAN.DISPLAY)")
-            columns = [desc[0] for desc in cursor.description] if cursor.description else []
-            rows = await cursor.fetchall()
+        cursor = self._conn.cursor()
+        await asyncio.wait_for(cursor.execute(f"EXPLAIN PLAN FOR {sql}"), timeout)
+        await asyncio.wait_for(
+            cursor.execute("SELECT * FROM TABLE(DBMS_XPLAN.DISPLAY)"), timeout
+        )
+        columns = [desc[0] for desc in cursor.description] if cursor.description else []
+        rows = await asyncio.wait_for(cursor.fetchall(), timeout)
         return [dict(zip(columns, row, strict=False)) for row in rows]
 
     async def health(self) -> bool:
         if not self._conn:
             return False
         try:
-            async with asyncio.timeout(5):
-                cursor = self._conn.cursor()
-                await cursor.execute("SELECT 1 FROM DUAL")
+            cursor = self._conn.cursor()
+            await asyncio.wait_for(cursor.execute("SELECT 1 FROM DUAL"), 5)
             return True
         except Exception:
             return False

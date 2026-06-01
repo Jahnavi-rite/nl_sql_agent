@@ -23,9 +23,11 @@ from app.models.enums import (
     Dialect,
     FeedbackAction,
     IterationStatus,
+    RequestStatus,
     SessionStatus,
 )
 from app.models.session import (
+    MAX_ITERATIONS,
     AgentTrace,
     Feedback,
     Iteration,
@@ -45,6 +47,10 @@ _SESSION_FULL = selectinload(Session.requests).selectinload(
 _REQUEST_ITERATIONS = selectinload(Request.iterations).selectinload(
     Iteration.feedbacks
 )
+
+_REQUEST_WITH_FULL = selectinload(Request.iterations).selectinload(
+    Iteration.feedbacks
+).selectinload(Iteration.traces)
 
 
 # ---------------------------------------------------------------------------
@@ -103,7 +109,7 @@ async def close_session(
     if session is None:
         return None
     session.status = SessionStatus.CLOSED
-    session.closed_at = datetime.now(timezone.utc)
+    session.closed_at = datetime.now(timezone.utc)  # noqa: UP017 — Python 3.10 compat
     await db.commit()
     await db.refresh(session)
     await clear_session_context(str(session_id))
@@ -150,9 +156,68 @@ async def get_request(
     return result.scalar_one_or_none()
 
 
+async def get_request_with_full(
+    db: AsyncSession,
+    request_id: uuid.UUID,
+) -> Request | None:
+    """Retrieve a request with all iterations, feedbacks, and traces."""
+    stmt = select(Request).where(Request.id == request_id).options(_REQUEST_WITH_FULL)
+    result = await db.execute(stmt)
+    return result.scalar_one_or_none()
+
+
+async def update_request_status(
+    db: AsyncSession,
+    request_id: uuid.UUID,
+    status: RequestStatus,
+    *,
+    approved_iteration_id: uuid.UUID | None = None,
+) -> Request | None:
+    """Update the status of a request."""
+    req = await get_request(db, request_id)
+    if req is None:
+        return None
+    req.status = status
+    if approved_iteration_id is not None:
+        req.approved_iteration_id = approved_iteration_id
+    await db.commit()
+    await db.refresh(req)
+    logger.info("request_status_updated", request_id=str(request_id), status=str(status))
+    return req
+
+
+async def get_iteration(
+    db: AsyncSession,
+    iteration_id: uuid.UUID,
+) -> Iteration | None:
+    """Retrieve a single iteration by ID."""
+    stmt = select(Iteration).where(Iteration.id == iteration_id)
+    result = await db.execute(stmt)
+    return result.scalar_one_or_none()
+
+
 # ---------------------------------------------------------------------------
 # Iteration CRUD
 # ---------------------------------------------------------------------------
+
+class IterationCapError(Exception):
+    def __init__(self, request_id: uuid.UUID, max_iterations: int = MAX_ITERATIONS) -> None:
+        self.request_id = request_id
+        self.max_iterations = max_iterations
+        super().__init__(f"Iteration cap of {max_iterations} reached for request {request_id}")
+
+
+async def count_iterations(db: AsyncSession, request_id: uuid.UUID) -> int:
+    stmt = (
+        select(Iteration.attempt_number)
+        .where(Iteration.request_id == request_id)
+        .order_by(Iteration.attempt_number.desc())
+        .limit(1)
+    )
+    result = await db.execute(stmt)
+    last = result.scalar_one_or_none()
+    return last or 0
+
 
 async def append_iteration(
     db: AsyncSession,
@@ -165,10 +230,12 @@ async def append_iteration(
     critic_score: float | None = None,
     critic_notes: str | None = None,
     status: IterationStatus = IterationStatus.PENDING,
+    supersede_previous: bool = False,
 ) -> Iteration:
     """Append a new iteration (SQL generation attempt) to a request.
 
     Automatically determines the next attempt_number.
+    Raises IterationCapError if MAX_ITERATIONS has been reached.
     """
     # Determine next attempt number
     stmt = (
@@ -180,6 +247,22 @@ async def append_iteration(
     result = await db.execute(stmt)
     last_attempt = result.scalar_one_or_none()
     next_attempt = (last_attempt or 0) + 1
+
+    if next_attempt > MAX_ITERATIONS:
+        raise IterationCapError(request_id)
+
+    # Supersede previous iterations if requested (for regeneration)
+    if supersede_previous and last_attempt is not None:
+        prev_stmt = (
+            select(Iteration)
+            .where(Iteration.request_id == request_id)
+            .where(Iteration.status != IterationStatus.SUPERSEDED)
+        )
+        prev_result = await db.execute(prev_stmt)
+        for prev_it in prev_result.scalars().all():
+            if prev_it.status != IterationStatus.APPROVED:
+                prev_it.status = IterationStatus.SUPERSEDED
+        await db.commit()
 
     iteration = Iteration(
         request_id=request_id,

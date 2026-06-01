@@ -14,12 +14,10 @@ Covers:
 
 from __future__ import annotations
 
-import asyncio
 import time
 import uuid
 
 import pytest
-import pytest_asyncio
 
 from app.models.enums import (
     Dialect,
@@ -381,7 +379,7 @@ class TestHistory:
         r1 = await create_request(
             db, session_id=session.id, question="Show users"
         )
-        it1a = await append_iteration(
+        await append_iteration(
             db, request_id=r1.id, generated_sql="SELECT * FROM users", confidence=0.9
         )
         it1b = await append_iteration(

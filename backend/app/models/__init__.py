@@ -5,10 +5,12 @@ from app.models.enums import (
     Dialect,
     FeedbackAction,
     IterationStatus,
+    RequestStatus,
     SessionStatus,
 )
 from app.models.session import (
     AgentTrace,
+    Dataset,
     Feedback,
     Iteration,
     Request,
@@ -18,12 +20,14 @@ from app.models.session import (
 __all__ = [
     "AgentTrace",
     "Base",
+    "Dataset",
     "Dialect",
     "Feedback",
     "FeedbackAction",
     "Iteration",
     "IterationStatus",
     "Request",
+    "RequestStatus",
     "Session",
     "SessionStatus",
     "TimestampMixin",

@@ -11,8 +11,7 @@ Usage:
 
 from pathlib import Path
 
-from pydantic import ConfigDict
-from pydantic_settings import BaseSettings
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
@@ -46,17 +45,31 @@ class Settings(BaseSettings):
             f"@{self.POSTGRES_HOST}:{self.POSTGRES_PORT}/{self.POSTGRES_DB}"
         )
 
+    @property
+    def DATABASE_URL_SYNC(self) -> str:
+        """Build a sync PostgreSQL connection string (no +asyncpg)."""
+        return (
+            f"postgresql://{self.POSTGRES_USER}:{self.POSTGRES_PASSWORD}"
+            f"@{self.POSTGRES_HOST}:{self.POSTGRES_PORT}/{self.POSTGRES_DB}"
+        )
+
     # --- Redis ---
     REDIS_HOST: str = "redis"
     REDIS_PORT: int = 6379
-    REDIS_URL: str = "redis://redis:6379/0"
+
+    @property
+    def REDIS_URL(self) -> str:
+        """Build the Redis connection string."""
+        return f"redis://{self.REDIS_HOST}:{self.REDIS_PORT}/0"
 
     # --- OpenAI / LLM ---
-  #  OPENAI_API_KEY: str = ""
-   # OPENAI_MODEL: str = "gpt-4o"
-    #OPENAI_API_BASE: str = "https://api.openai.com/v1"
+    OPENAI_API_KEY: str = ""
+    OPENAI_MODEL: str = "gpt-4o"
+    OPENAI_API_BASE: str = "https://api.openai.com/v1"
+    LLM_TIMEOUT_SECONDS: int = 60
+    LLM_TEMPERATURE: float = 0.1
 
-    model_config = ConfigDict(
+    model_config = SettingsConfigDict(
         env_file=Path(__file__).resolve().parent.parent.parent / ".env",
         case_sensitive=True,
     )

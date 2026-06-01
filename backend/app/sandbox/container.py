@@ -87,7 +87,10 @@ class SandboxContainer:
         self.port: int = 0
 
         self._suffix: str = uuid.uuid4().hex[:8]
-        self._client = docker.from_env()
+        # Docker Desktop on Windows can take longer than the SDK's default
+        # 60s HTTP timeout when starting or pulling database images.
+        docker_timeout = int(os.getenv("SANDBOX_DOCKER_CLIENT_TIMEOUT", "300"))
+        self._client = docker.from_env(timeout=docker_timeout)
 
     # ------------------------------------------------------------------
     # Public lifecycle

@@ -1,11 +1,8 @@
 """
-SQL Safety Validator — static analysis layer before sandbox execution.
+SQL Safety Validator — static analysis layer before execution.
 
 Uses ``sqlglot`` to parse SQL into an AST and walk it for dangerous patterns.
-Supports PostgreSQL and Oracle dialects, with two validation modes:
-
-- ``schema_setup``  — looser rules for initial schema creation
-- ``query_under_test`` — strict rules for LLM-generated queries
+Only allows safe single-statement SELECT queries.
 """
 
 from __future__ import annotations
@@ -111,6 +108,9 @@ BLOCKED_FUNCTIONS: set[str] = {
     "dbms_alert",
     "dbms_backup_restore",
     "dbms_lob",
+    # Generic dangerous functions
+    "pg_sleep",
+    "gen_random_uuid",
 }
 
 # Oracle package-qualified function prefixes (e.g. UTL_HTTP.REQUEST).
@@ -142,18 +142,28 @@ BLOCKED_COMMANDS: set[str] = {"do"}
 # Redaction
 # ---------------------------------------------------------------------------
 
-# Regex to catch single-quoted strings and PostgreSQL dollar-quoted strings
-# that sqlglot may not fully normalise.
 _RE_SINGLE_QUOTED = re.compile(r"'(?:[^'\\]|\\.)*'")
 _RE_DOLLAR_QUOTED = re.compile(r"\$[^$]*\$.*?\$[^$]*\$", re.DOTALL)
 
 
 def _redact_sql(sql: str) -> str:
     """Replace string literals with ``'REDACTED'``."""
-    # Dollar-quoted first (longer spans), then single-quoted.
     redacted = _RE_DOLLAR_QUOTED.sub("'REDACTED'", sql)
     redacted = _RE_SINGLE_QUOTED.sub("'REDACTED'", redacted)
     return redacted
+
+
+# ---------------------------------------------------------------------------
+# Comment detection
+# ---------------------------------------------------------------------------
+
+_RE_BLOCK_COMMENT = re.compile(r"/\*.*?\*/", re.DOTALL)
+_RE_LINE_COMMENT_SQL = re.compile(r"--.*$", re.MULTILINE)
+
+
+def _has_sql_comments(sql: str) -> bool:
+    """Check if SQL contains /* */ or -- style comments."""
+    return bool(_RE_BLOCK_COMMENT.search(sql)) or bool(_RE_LINE_COMMENT_SQL.search(sql))
 
 
 # ---------------------------------------------------------------------------
@@ -193,8 +203,6 @@ def _collect_package_funcs(tree: exp.Expression) -> list[str]:
     qualified: list[str] = []
     for node in tree.walk():
         if isinstance(node, exp.Dot):
-            # Dot(this=UTL_HTTP, expression=REQUEST(...))
-            # this may be Column or Identifier depending on dialect
             pkg = ""
             if isinstance(node.this, (exp.Column, exp.Identifier)):
                 pkg = _normalise(node.this.name)
@@ -211,7 +219,6 @@ def _has_copy_program(tree: exp.Expression) -> bool:
             for file_node in node.args.get("files", []):
                 if isinstance(file_node, exp.Identifier) and _normalise(file_node.name) == "program":
                     return True
-            # Also check params for PROGRAM keyword
             for param in node.args.get("params", []):
                 if isinstance(param, exp.CopyParameter):
                     inner = param.this
@@ -234,6 +241,15 @@ def _has_do_block(tree: exp.Expression) -> bool:
     return False
 
 
+def _count_statements(sql: str, dialect: str) -> int:
+    """Count the number of top-level SQL statements."""
+    try:
+        trees = sqlglot.parse(sql, dialect=dialect)
+        return len([t for t in trees if t is not None])
+    except Exception:
+        return -1
+
+
 # ---------------------------------------------------------------------------
 # Core validation
 # ---------------------------------------------------------------------------
@@ -248,10 +264,8 @@ def _check_system_schemas(tables: list[tuple[str, str]]) -> list[str]:
         for prefix in BLOCKED_TABLE_PREFIXES:
             if table.startswith(prefix):
                 reasons.append(f"Access to '{table}' is blocked (starts with '{prefix}')")
-        # Oracle V$ and ALL_ views
         if table.startswith(BLOCKED_ORACLE_VIEW_PREFIXES):
             reasons.append(f"Access to Oracle view '{table}' is blocked")
-        # Known PostgreSQL system tables (even without schema prefix)
         if table in BLOCKED_PG_TABLES:
             reasons.append(f"Access to system table '{table}' is blocked")
     return reasons
@@ -262,10 +276,6 @@ def _check_system_schemas(tables: list[tuple[str, str]]) -> list[str]:
 # ---------------------------------------------------------------------------
 
 # Build a combined regex for dangerous function names.
-# Matches both bare calls (pg_read_file(...)) and package-qualified calls
-# (DBMS_SCHEDULER.CREATE_JOB(...), UTL_HTTP.REQUEST(...)).
-# Uses optional underscores/spaces between words to defeat comment-based
-# obfuscation like pg_read/**/file( which becomes pg_readfile( after stripping.
 def _flex_pattern(name: str) -> str:
     """Build a regex that matches *name* allowing ``_`` or whitespace between words."""
     parts = name.split("_")
@@ -287,18 +297,12 @@ _RE_SQL_COMMENTS = re.compile(r"/\*.*?\*/", re.DOTALL)
 
 
 def _regex_scan(sql: str, mode: ValidationMode) -> list[str]:
-    """Regex-based fallback for patterns sqlglot's AST may miss.
-
-    Catches dangerous functions inside dollar-quoted bodies, PL/SQL blocks,
-    and other constructs that sqlglot can't fully parse.
-    """
-    # Strip block comments to defeat obfuscation like pg_read/**/file(...)
+    """Regex-based fallback for patterns sqlglot's AST may miss."""
     clean_sql = _RE_SQL_COMMENTS.sub("", sql)
 
     reasons: list[str] = []
     for match in _RE_BLOCKED_FUNCS.finditer(clean_sql):
         matched = match.group().rstrip("(").strip().lower()
-        # Extract the base package/function name
         fn_name = matched.split(".")[0].split()[-1]
         reasons.append(f"Blocked function (regex): {fn_name}")
     if _RE_COPY_PROGRAM.search(clean_sql):
@@ -334,11 +338,6 @@ def _check_copy_program(tree: exp.Expression) -> list[str]:
 def _check_execute_immediate(tree: exp.Expression, mode: ValidationMode) -> list[str]:
     if not _has_execute_immediate(tree):
         return []
-    if mode == ValidationMode.QUERY_UNDER_TEST:
-        return ["EXECUTE IMMEDIATE is blocked in query_under_test mode"]
-    # In schema_setup, we allow it only if there's a clear safe literal —
-    # but since we can't statically verify the string content reliably,
-    # we block it universally for safety.
     return ["EXECUTE IMMEDIATE is blocked (dynamic SQL)"]
 
 
@@ -353,7 +352,6 @@ def _check_call_system(tree: exp.Expression) -> list[str]:
     reasons: list[str] = []
     for node in tree.walk():
         if isinstance(node, exp.Command) and _normalise(node.name) == "call":
-            # The expression after CALL is a string that may contain a qualified name
             expr = node.args.get("expression")
             if expr is not None:
                 expr_str = _normalise(expr.sql())
@@ -373,7 +371,7 @@ def validate(
     dialect: str,
     mode: ValidationMode | str = ValidationMode.QUERY_UNDER_TEST,
 ) -> ValidationResult:
-    """Validate *sql* for safety before sandbox execution.
+    """Validate *sql* for safety.
 
     Parameters
     ----------
@@ -406,10 +404,6 @@ def validate(
         trees = sqlglot.parse(sql, dialect=dialect)
     except sqlglot.errors.SqlglotError as exc:
         logger.debug("Parse error: %s", exc)
-        # If regex already caught something dangerous, report those reasons.
-        # Otherwise, suppress the parse error — sqlglot has known limitations
-        # with PL/SQL blocks, XMLELEMENT, and other advanced constructs.
-        # The regex scan above has already checked for dangerous patterns.
         is_safe = len(all_reasons) == 0
         return ValidationResult(is_safe=is_safe, reasons=all_reasons, redacted_sql=redacted_sql)
 
@@ -456,3 +450,118 @@ def validate_or_raise(
     if not result.is_safe:
         raise UnsafeSQLError(reasons=result.reasons, redacted_sql=result.redacted_sql)
     return result.redacted_sql
+
+
+# ---------------------------------------------------------------------------
+# SELECT-only validation (for the final query)
+# ---------------------------------------------------------------------------
+
+BLOCKED_DML_STATEMENTS: set[str] = {
+    "drop",
+    "delete",
+    "truncate",
+    "alter",
+    "grant",
+    "revoke",
+    "insert",
+    "update",
+    "merge",
+    "replace",
+    "create",
+    "rename",
+    "call",
+    "execute",
+    "declare",
+    "begin",
+    "commit",
+    "rollback",
+    "savepoint",
+    "lock",
+    "set",
+    "copy",
+    "vacuum",
+    "analyze",
+    "reindex",
+    "cluster",
+    "notify",
+    "listen",
+    "unlisten",
+    "load",
+    "discard",
+    "import",
+}
+
+
+def _check_multi_statement(sql: str, dialect: str) -> list[str]:
+    """Reject queries containing more than one top-level statement."""
+    stmt_count = _count_statements(sql, dialect)
+    if stmt_count > 1:
+        return [f"Multi-statement SQL detected ({stmt_count} statements); only single SELECT allowed"]
+    return []
+
+
+def _check_comments(sql: str) -> list[str]:
+    """Reject SQL containing comments (-- or /* */)."""
+    if _has_sql_comments(sql):
+        return ["SQL comments are blocked (/* */ or --)"]
+    return []
+
+
+def validate_select_only(sql: str, dialect: str) -> ValidationResult:
+    """Validate that *sql* contains only a single SELECT (or WITH ... SELECT) statement.
+
+    This is stricter than the general safety check — it rejects any DML, DDL,
+    administrative commands, multi-statement SQL, and comments in the final query.
+    """
+    all_reasons: list[str] = []
+
+    # Check for comments first
+    all_reasons.extend(_check_comments(sql))
+
+    # Check for multi-statement
+    all_reasons.extend(_check_multi_statement(sql, dialect))
+
+    try:
+        trees = sqlglot.parse(sql, dialect=dialect)
+    except sqlglot.errors.SqlglotError as exc:
+        return ValidationResult(is_safe=False, reasons=[f"Parse error: {exc}"])
+
+    valid_trees = [t for t in trees if t is not None]
+
+    # Multi-statement check (already checked above but also check here)
+    if len(valid_trees) > 1:
+        all_reasons.append(
+            f"Multiple statements found ({len(valid_trees)}); only a single SELECT is allowed"
+        )
+
+    seen_select = False
+    for tree in valid_trees:
+        if tree is None:
+            continue
+        if isinstance(tree, exp.Select):
+            seen_select = True
+            continue
+        if isinstance(tree, exp.With):
+            inner = tree.this
+            if isinstance(inner, exp.Select):
+                seen_select = True
+                continue
+            all_reasons.append("WITH block must contain a SELECT statement")
+            break
+        stmt_type = type(tree).__name__.lower()
+        if stmt_type in BLOCKED_DML_STATEMENTS:
+            all_reasons.append(f"Blocked statement type in final query: {stmt_type}")
+        elif isinstance(tree, exp.Command):
+            cmd_name = _normalise(tree.name)
+            if cmd_name in BLOCKED_DML_STATEMENTS:
+                all_reasons.append(f"Blocked command in final query: {cmd_name}")
+            else:
+                all_reasons.append(f"Non-SELECT command in final query: {cmd_name}")
+        else:
+            all_reasons.append(f"Non-SELECT statement in final query: {stmt_type}")
+
+    if not seen_select and not all_reasons:
+        all_reasons.append("Query must contain a SELECT statement")
+
+    is_safe = len(all_reasons) == 0
+    return ValidationResult(is_safe=is_safe, reasons=all_reasons, redacted_sql=sql)

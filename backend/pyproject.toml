@@ -2,7 +2,7 @@
 name = "nl-sql-agent"
 version = "0.1.0"
 description = "AI-powered SQL agent — Phase 0 foundation"
-requires-python = ">=3.11"
+requires-python = ">=3.10"
 dependencies = [
     "fastapi>=0.110,<1",
     "uvicorn[standard]>=0.29,<1",
@@ -19,6 +19,10 @@ dependencies = [
     "sqlalchemy[asyncio]>=2.0,<3",
     "alembic>=1.13,<2",
     "redis[hiredis]>=5.0,<6",
+    "pandas>=2.0,<3",
+    "openpyxl>=3.1,<4",
+    "psycopg2-binary>=2.9,<3",
+    "python-multipart>=0.0.9,<1",
 ]
 
 [project.optional-dependencies]
@@ -67,7 +71,7 @@ warn_unused_configs = true
 plugins = ["pydantic.mypy"]
 
 [[tool.mypy.overrides]]
-module = ["structlog.*", "asyncpg.*", "redis.*", "sqlglot.*"]
+module = ["structlog.*", "asyncpg.*", "redis.*", "sqlglot.*", "pandas.*"]
 ignore_missing_imports = true
 
 # ---------------------------------------------------------------------------
@@ -78,4 +82,5 @@ testpaths = ["tests"]
 asyncio_mode = "auto"
 markers = [
     "integration: tests that require Docker and start real database containers",
+    "e2e: end-to-end tests that exercise the full NL->SQL pipeline (LLM + sandbox)",
 ]
