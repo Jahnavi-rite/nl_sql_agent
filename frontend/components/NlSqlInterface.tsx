@@ -284,9 +284,14 @@ export default function NlSqlInterface() {
               </button>
             ))}
           </div>
+          {dialect === "oracle" ? (
+            <div className="rounded-md border border-amber-700 bg-amber-950/40 p-2 text-xs text-amber-200">
+              Oracle support is coming soon. Only PostgreSQL is available at this time.
+            </div>
+          ) : null}
           <button
             className="w-full rounded-md bg-emerald-500 px-6 py-3 text-sm font-semibold text-gray-950 transition hover:bg-emerald-400 disabled:cursor-not-allowed disabled:bg-gray-700 disabled:text-gray-400 lg:w-auto"
-            disabled={isRunning || !prompt.trim()}
+            disabled={isRunning || !prompt.trim() || dialect === "oracle"}
             onClick={handleSubmit}
             type="button"
           >

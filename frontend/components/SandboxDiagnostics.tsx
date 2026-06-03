@@ -99,18 +99,25 @@ export default function SandboxDiagnostics() {
 
       <div className="grid gap-4 lg:grid-cols-[220px_1fr]">
         <div className="space-y-3">
+          {activeDialect === "oracle" ? (
+            <div className="rounded-md border border-amber-700 bg-amber-950/40 p-3 text-xs text-amber-200">
+              Oracle sandbox support is coming soon. Only PostgreSQL is available at this time.
+            </div>
+          ) : null}
           <button
             className="w-full rounded-md bg-cyan-500 px-4 py-3 text-sm font-semibold text-gray-950 transition hover:bg-cyan-400 disabled:cursor-not-allowed disabled:bg-gray-700 disabled:text-gray-400"
-            disabled={isRunning}
+            disabled={isRunning || activeDialect === "oracle"}
             onClick={() => handleRun(activeDialect)}
             type="button"
           >
             {isRunning ? "Running..." : `Run ${activeDialect} check`}
           </button>
 
-          <div className="rounded-md border border-gray-700 bg-gray-900 p-3 text-xs text-gray-400">
-            Oracle can take around 90 seconds on a cold start.
-          </div>
+          {activeDialect !== "oracle" ? (
+            <div className="rounded-md border border-gray-700 bg-gray-900 p-3 text-xs text-gray-400">
+              Oracle can take around 90 seconds on a cold start.
+            </div>
+          ) : null}
         </div>
 
         <div className="space-y-4 rounded-md border border-gray-700 bg-gray-900 p-4">
@@ -139,7 +146,7 @@ export default function SandboxDiagnostics() {
             />
             <button
               className="rounded-md bg-emerald-500 px-4 py-2 text-sm font-semibold text-gray-950 transition hover:bg-emerald-400 disabled:cursor-not-allowed disabled:bg-gray-700 disabled:text-gray-400"
-              disabled={isRunning || !sql.trim()}
+              disabled={isRunning || !sql.trim() || activeDialect === "oracle"}
               onClick={handleRunSql}
               type="button"
             >
