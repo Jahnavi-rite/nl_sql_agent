@@ -43,6 +43,13 @@ export default function NlSqlInterface() {
   const [editedSql, setEditedSql] = useState("");
   const [rejectMode, setRejectMode] = useState(false);
   const [rejectComment, setRejectComment] = useState("");
+  const [savedState, setSavedState] = useState<{
+    result: CreateNLResponse | null;
+    error: string | null;
+    requestId: string | null;
+    iterations: IterationDetail[];
+    requestStatus: string;
+  } | null>(null);
 
   useEffect(() => {
     getSchema()
@@ -81,15 +88,24 @@ export default function NlSqlInterface() {
   function handleDialectChange(d: SandboxDialect) {
     setDialect(d);
     if (d === "oracle") {
+      setSavedState({ result, error, requestId, iterations, requestStatus });
       setResult(null);
       setError(null);
       resetFeedbackState();
+    } else if (d === "postgres" && savedState) {
+      setResult(savedState.result);
+      setError(savedState.error);
+      setRequestId(savedState.requestId);
+      setIterations(savedState.iterations);
+      setRequestStatus(savedState.requestStatus);
+      setSavedState(null);
     }
   }
 
   async function handleSubmit() {
     if (!prompt.trim()) return;
 
+    setSavedState(null);
     setResult(null);
     setError(null);
     resetFeedbackState();
