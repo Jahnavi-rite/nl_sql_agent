@@ -9,6 +9,7 @@
 #   - redis:     Redis 7 cache
 #   - backend:   FastAPI application
 #   - frontend:  Next.js application
+#   - jaeger:    OpenTelemetry trace visualization (UIs at :16686)
 
 services:
   # ---------------------------------------------------------------------------
@@ -26,7 +27,7 @@ services:
       - "${POSTGRES_PORT:-5432}:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
-      - ./seeds:/docker-entrypoint-initdb.d  # Auto-run seed SQL files
+      - ./seeds:/docker-entrypoint-initdb.d
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-nlsql} -d ${POSTGRES_DB:-nlsql_agent}"]
       interval: 5s
@@ -55,6 +56,22 @@ services:
       - nlsql-network
 
   # ---------------------------------------------------------------------------
+  # Jaeger — OpenTelemetry trace visualization
+  # ---------------------------------------------------------------------------
+  jaeger:
+    image: jaegertracing/all-in-one:latest
+    container_name: nlsql-jaeger
+    restart: unless-stopped
+    ports:
+      - "16686:16686"   # UI
+      - "4317:4317"     # OTLP gRPC
+      - "4318:4318"     # OTLP HTTP
+    environment:
+      COLLECTOR_OTLP_ENABLED: "true"
+    networks:
+      - nlsql-network
+
+  # ---------------------------------------------------------------------------
   # Backend — FastAPI application
   # ---------------------------------------------------------------------------
   backend:
@@ -69,11 +86,13 @@ services:
       POSTGRES_HOST: postgres
       REDIS_HOST: redis
       SANDBOX_ATTACH_CONTAINER: nlsql-backend
+      OTLP_ENDPOINT: http://jaeger:4317
+      OTLP_ENABLED: "true"
     ports:
       - "${BACKEND_PORT:-8000}:8000"
     volumes:
-      - ../backend/app:/app/app  # Hot-reload: mount source code
-      - /var/run/docker.sock:/var/run/docker.sock  # Lets the sandbox manager create child DB containers
+      - ../backend/app:/app/app
+      - /var/run/docker.sock:/var/run/docker.sock
     depends_on:
       postgres:
         condition: service_healthy
@@ -101,7 +120,7 @@ services:
     ports:
       - "${FRONTEND_PORT:-3000}:3000"
     volumes:
-      - ../frontend/app:/app/app          # Hot-reload
+      - ../frontend/app:/app/app
       - ../frontend/components:/app/components
       - ../frontend/lib:/app/lib
     depends_on:
@@ -111,14 +130,14 @@ services:
       - nlsql-network
 
 # ---------------------------------------------------------------------------
-# Volumes — Persist data between container restarts
+# Volumes
 # ---------------------------------------------------------------------------
 volumes:
   postgres_data:
   redis_data:
 
 # ---------------------------------------------------------------------------
-# Network — All services communicate on this network
+# Network
 # ---------------------------------------------------------------------------
 networks:
   nlsql-network:

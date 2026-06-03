@@ -5,8 +5,13 @@ This is the main module that creates and configures the FastAPI app.
 It sets up:
 - CORS (allows the frontend to call the backend)
 - Structured logging (JSON logs for production)
+- OpenTelemetry tracing (Jaeger export)
+- Prometheus /metrics endpoint
+- Rate limiting middleware
+- Structured error handling
+- Maintenance mode
 - Route registration
-- Lifespan events (startup/shutdown hooks for DB, Redis, etc.)
+- Lifespan events (startup/shutdown hooks for DB, Redis, janitor, etc.)
 """
 
 import asyncio
@@ -14,8 +19,6 @@ import sys
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
-# Windows + asyncpg fix: use SelectorEventLoop instead of ProactorEventLoop
-# to avoid "unexpected connection_lost() call" errors.
 if sys.platform == "win32":
     asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
@@ -33,31 +36,30 @@ from app.api.stream import router as stream_router
 from app.api.validate import router as validate_router
 from app.core.config import settings
 from app.core.database import engine
+from app.core.errors import StructuredErrorMiddleware
 from app.core.logging import setup_logging
+from app.core.maintenance import MaintenanceMiddleware
+from app.core.metrics import MetricsMiddleware, metrics_response
+from app.core.rate_limiter import RateLimitMiddleware
 from app.core.redis import redis_client
+from app.core.telemetry import TracingMiddleware, setup_telemetry
+from app.services.janitor import SandboxJanitor
 from app.services.stream_manager import stream_manager
 
-# Initialize structured logging
 setup_logging(settings.LOG_LEVEL)
 logger = structlog.get_logger()
+
+janitor = SandboxJanitor()
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-    """
-    Lifespan context manager — runs on startup and shutdown.
-
-    Use this to initialize resources (DB connections, Redis, etc.)
-    and clean them up when the app stops.
-
-    Startup code runs before `yield`, shutdown code runs after.
-    """
-    # --- Startup ---
     logger.info(
         "app_starting",
         version=settings.APP_VERSION,
         env=settings.APP_ENV,
         port=settings.BACKEND_PORT,
+        maintenance=settings.MAINTENANCE_MODE,
     )
 
     # Verify database connectivity
@@ -106,44 +108,77 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     except Exception as exc:
         logger.warning("startup_ingestion_error", error=str(exc))
 
-    # Start WebSocket stream manager cleanup task
+    # Start background services
     await stream_manager.start_cleanup_task()
     logger.info("stream_manager_cleanup_started")
 
-    logger.info("app_ready", path="/health", port=settings.BACKEND_PORT)
-    yield  # App is running
+    await janitor.start()
+    logger.info("sandbox_janitor_started")
 
-    # --- Shutdown ---
+    logger.info(
+        "app_ready",
+        path="/health",
+        port=settings.BACKEND_PORT,
+        metrics="/metrics",
+    )
+    yield
+
+    # --- Graceful Shutdown ---
+    logger.info("app_shutting_down", shutdown_timeout=settings.SHUTDOWN_TIMEOUT_SECONDS)
+    shutdown_start = asyncio.get_event_loop().time()
+
     await stream_manager.stop_cleanup_task()
+    await janitor.stop()
+
     await engine.dispose()
     await redis_client.aclose()
-    logger.info("app_shutting_down")
+
+    elapsed = (asyncio.get_event_loop().time() - shutdown_start) * 1000
+    logger.info("app_shutdown_complete", duration_ms=round(elapsed, 1))
 
 
-# Create the FastAPI application
 app = FastAPI(
     title="NL SQL Agent",
     version=settings.APP_VERSION,
-    description="AI-powered SQL agent API",
+    description="AI-powered SQL agent API — Phase 8: Robustness & Observability",
     lifespan=lifespan,
 )
 
 # ---------------------------------------------------------------------------
-# CORS — Allow the frontend to make requests to this backend
+# Middleware — Order matters: outermost first, innermost last
 # ---------------------------------------------------------------------------
-# Without CORS, browsers block requests from localhost:3000 → localhost:8000
-# because they're considered different "origins" (different ports = different origins).
+# 1. CORS (outermost)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=settings.CORS_ORIGINS,  # Which frontend URLs can call us
+    allow_origins=settings.CORS_ORIGINS,
     allow_origin_regex=settings.CORS_ORIGIN_REGEX,
-    allow_credentials=True,               # Allow cookies/auth headers
-    allow_methods=["*"],                   # Allow all HTTP methods (GET, POST, etc.)
-    allow_headers=["*"],                   # Allow all request headers
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
+# 2. Maintenance mode (checks before any processing)
+app.add_middleware(MaintenanceMiddleware)
+
+# 3. Structured error handler (catches all downstream exceptions)
+app.add_middleware(StructuredErrorMiddleware)
+
+# 4. Rate limiting (per-user and per-session)
+app.add_middleware(RateLimitMiddleware)
+
+# 5. Metrics collection (latency, counters)
+app.add_middleware(MetricsMiddleware)
+
+# 6. OpenTelemetry tracing (innermost — captures all spans)
+app.add_middleware(TracingMiddleware)
+
 # ---------------------------------------------------------------------------
-# Routes — Register all API routers
+# OpenTelemetry instrumentation
+# ---------------------------------------------------------------------------
+setup_telemetry(app)
+
+# ---------------------------------------------------------------------------
+# Routes
 # ---------------------------------------------------------------------------
 app.include_router(datasets_router)
 app.include_router(feedback_router)
@@ -153,3 +188,37 @@ app.include_router(schema_router)
 app.include_router(stream_router)
 app.include_router(validate_router)
 app.include_router(requests_router)
+
+# ---------------------------------------------------------------------------
+# Prometheus /metrics — must be after middleware but registered directly
+# ---------------------------------------------------------------------------
+@app.get("/metrics", include_in_schema=False)
+async def metrics():
+    return metrics_response()
+
+# ---------------------------------------------------------------------------
+# Structured 404/405 error handlers
+# ---------------------------------------------------------------------------
+from starlette.responses import JSONResponse as _JSONResponse
+
+@app.exception_handler(404)
+async def not_found_handler(request, exc):
+    return _JSONResponse(
+        status_code=404,
+        content={
+            "error_code": "ERR_NOT_FOUND",
+            "message": f"The requested resource was not found: {request.url.path}",
+            "retry_hint": "Check the URL and try again.",
+        },
+    )
+
+@app.exception_handler(405)
+async def method_not_allowed_handler(request, exc):
+    return _JSONResponse(
+        status_code=405,
+        content={
+            "error_code": "ERR_METHOD_NOT_ALLOWED",
+            "message": f"Method {request.method} not allowed for {request.url.path}",
+            "retry_hint": "Check the HTTP method and try again.",
+        },
+    )

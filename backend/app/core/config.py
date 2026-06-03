@@ -69,6 +69,29 @@ class Settings(BaseSettings):
     LLM_TIMEOUT_SECONDS: int = 60
     LLM_TEMPERATURE: float = 0.1
 
+    # --- OpenTelemetry / Jaeger ---
+    OTLP_ENDPOINT: str = "http://jaeger:4317"
+    OTLP_SERVICE_NAME: str = "nl-sql-agent"
+    OTLP_ENABLED: bool = True
+
+    # --- Prometheus / Metrics ---
+    METRICS_ENABLED: bool = True
+
+    # --- Rate Limiting ---
+    RATE_LIMIT_REQUESTS_PER_MINUTE: int = 30
+    RATE_LIMIT_SESSION_REQUESTS_PER_MINUTE: int = 10
+    RATE_LIMIT_WS_PER_SESSION: int = 5
+
+    # --- Maintenance ---
+    MAINTENANCE_MODE: bool = False
+
+    # --- Sandbox Janitor ---
+    JANITOR_INTERVAL_SECONDS: int = 300
+    SANDBOX_MAX_IDLE_MINUTES: int = 60
+
+    # --- Graceful Shutdown ---
+    SHUTDOWN_TIMEOUT_SECONDS: int = 30
+
     model_config = SettingsConfigDict(
         env_file=Path(__file__).resolve().parent.parent.parent / ".env",
         case_sensitive=True,
