@@ -284,6 +284,22 @@ export interface CreateNLResponse {
   created_at: string | null;
 }
 
+export interface IterationDetail {
+  iteration_id: string;
+  attempt_number: number;
+  status: string;
+  generated_sql: string;
+  confidence: number | null;
+  rationale: string | null;
+  execution_results: Record<string, unknown>[] | null;
+  execution_rows: number | null;
+  execution_ms: number | null;
+  error_message: string | null;
+  feedback_action: string | null;
+  feedback_comment: string | null;
+  created_at: string | null;
+}
+
 export interface GetRequestResponse {
   request_id: string;
   session_id: string;
@@ -296,7 +312,26 @@ export interface GetRequestResponse {
   execution_ms: number | null;
   status: string;
   error_message: string | null;
+  request_status: string | null;
+  iterations: IterationDetail[];
   created_at: string | null;
+}
+
+export interface FeedbackResponse {
+  action: string;
+  status: string;
+  request_status: string;
+  iteration_id: string;
+  attempt_number: number;
+  query_sql: string;
+  confidence: number | null;
+  rationale: string | null;
+  execution_results: Record<string, unknown>[];
+  execution_rows: number;
+  execution_ms: number | null;
+  error_message: string | null;
+  needs_human_intervention: boolean;
+  latency_ms: number | null;
 }
 
 const NL_TIMEOUT_MS = 180_000;
@@ -342,5 +377,28 @@ export async function getRequestDetails(
     {},
     10_000,
     "Fetch request details failed",
+  );
+}
+
+export async function submitFeedback(
+  sessionId: string,
+  iterationId: string,
+  action: "approve" | "reject" | "edit",
+  options?: { comment?: string; editedSql?: string },
+): Promise<FeedbackResponse> {
+  return fetchJson<FeedbackResponse>(
+    `/sessions/${sessionId}/feedback`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        iteration_id: iterationId,
+        action,
+        comment: options?.comment,
+        edited_sql: options?.editedSql,
+      }),
+    },
+    NL_TIMEOUT_MS,
+    "Feedback failed",
   );
 }

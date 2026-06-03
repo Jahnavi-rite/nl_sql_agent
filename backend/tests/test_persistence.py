@@ -535,19 +535,24 @@ class TestRedis:
 class TestPerformance:
     async def test_load_session_with_10_iterations(self, db):
         """Loading a session with 10 iterations must complete under 100ms."""
+        from app.models.session import Iteration as IterationModel
+
         session = await create_session(db, user_id="perf_test")
         request = await create_request(
             db, session_id=session.id, question="Performance test"
         )
 
-        # Seed 10 iterations
+        # Seed 10 iterations directly via ORM (bypasses iteration cap)
         for i in range(10):
-            await append_iteration(
-                db,
+            it = IterationModel(
                 request_id=request.id,
+                attempt_number=i + 1,
                 generated_sql=f"SELECT {i}",
                 confidence=0.5 + i * 0.05,
+                status=IterationStatus.EXECUTED,
             )
+            db.add(it)
+        await db.commit()
 
         # Measure eager load
         start = time.perf_counter()

@@ -48,9 +48,14 @@ _REQUEST_ITERATIONS = selectinload(Request.iterations).selectinload(
     Iteration.feedbacks
 )
 
-_REQUEST_WITH_FULL = selectinload(Request.iterations).selectinload(
-    Iteration.feedbacks
-).selectinload(Iteration.traces)
+_REQUEST_WITH_FULL = (
+    selectinload(Request.iterations)
+    .selectinload(Iteration.feedbacks)
+)
+_REQUEST_TRACES = (
+    selectinload(Request.iterations)
+    .selectinload(Iteration.traces)
+)
 
 
 # ---------------------------------------------------------------------------
@@ -161,7 +166,7 @@ async def get_request_with_full(
     request_id: uuid.UUID,
 ) -> Request | None:
     """Retrieve a request with all iterations, feedbacks, and traces."""
-    stmt = select(Request).where(Request.id == request_id).options(_REQUEST_WITH_FULL)
+    stmt = select(Request).where(Request.id == request_id).options(_REQUEST_WITH_FULL, _REQUEST_TRACES)
     result = await db.execute(stmt)
     return result.scalar_one_or_none()
 
@@ -181,7 +186,6 @@ async def update_request_status(
     if approved_iteration_id is not None:
         req.approved_iteration_id = approved_iteration_id
     await db.commit()
-    await db.refresh(req)
     logger.info("request_status_updated", request_id=str(request_id), status=str(status))
     return req
 

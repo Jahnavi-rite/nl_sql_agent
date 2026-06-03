@@ -105,6 +105,14 @@ async def _handle_approve(
     start_time: float,
 ) -> dict[str, Any]:
     """Mark iteration and request as approved."""
+    # Capture values before commit expires ORM attributes
+    iter_id = str(iteration.id)
+    attempt = iteration.attempt_number
+    gen_sql = iteration.generated_sql
+    exec_results = iteration.execution_results or []
+    exec_rows = iteration.execution_rows or 0
+    exec_ms = iteration.execution_ms
+
     iteration.status = IterationStatus.APPROVED
     await db.commit()
     await update_request_status(
@@ -115,8 +123,8 @@ async def _handle_approve(
     logger.info(
         "iteration_approved",
         request_id=str(req.id),
-        iteration_id=str(iteration.id),
-        attempt=iteration.attempt_number,
+        iteration_id=iter_id,
+        attempt=attempt,
         latency_ms=round(elapsed, 1),
     )
 
@@ -124,12 +132,12 @@ async def _handle_approve(
         "action": "approve",
         "status": "approved",
         "request_status": "approved",
-        "iteration_id": str(iteration.id),
-        "attempt_number": iteration.attempt_number,
-        "query_sql": iteration.generated_sql,
-        "execution_results": iteration.execution_results or [],
-        "execution_rows": iteration.execution_rows or 0,
-        "execution_ms": iteration.execution_ms,
+        "iteration_id": iter_id,
+        "attempt_number": attempt,
+        "query_sql": gen_sql,
+        "execution_results": exec_results,
+        "execution_rows": exec_rows,
+        "execution_ms": exec_ms,
         "latency_ms": round(elapsed, 1),
         "needs_human_intervention": False,
     }
@@ -148,6 +156,7 @@ async def _handle_reject(
     # Check iteration cap
     current_count = await count_iterations(db, req.id)
     if current_count >= 5:
+        iter_id = str(iteration.id)
         await update_request_status(db, req.id, RequestStatus.NEEDS_INTERVENTION)
         elapsed = (time.perf_counter() - start_time) * 1000
         logger.warning(
@@ -159,7 +168,7 @@ async def _handle_reject(
             "action": "reject",
             "status": "needs_human_intervention",
             "request_status": "needs_human_intervention",
-            "iteration_id": str(iteration.id),
+            "iteration_id": iter_id,
             "attempt_number": current_count,
             "query_sql": "",
             "error_message": "Iteration cap of 5 reached. Cannot regenerate further.",
@@ -189,7 +198,7 @@ async def _handle_reject(
         return {
             "action": "reject",
             "status": "failed",
-            "request_status": str(req.status),
+            "request_status": "open",
             "iteration_id": str(iteration.id),
             "attempt_number": iteration.attempt_number,
             "query_sql": "",
@@ -232,7 +241,7 @@ async def _handle_reject(
         return {
             "action": "reject",
             "status": "failed",
-            "request_status": str(req.status),
+            "request_status": "open",
             "iteration_id": str(iteration.id),
             "attempt_number": iteration.attempt_number,
             "query_sql": agent_response.query_sql,
@@ -307,7 +316,7 @@ async def _handle_reject(
     return {
         "action": "reject",
         "status": status,
-        "request_status": str(req.status),
+        "request_status": "open",
         "iteration_id": str(new_iter.id),
         "attempt_number": new_iter.attempt_number,
         "query_sql": agent_response.query_sql,
@@ -348,7 +357,7 @@ async def _handle_edit(
         return {
             "action": "edit",
             "status": "validation_failed",
-            "request_status": str(req.status),
+            "request_status": "open",
             "iteration_id": str(iteration.id),
             "attempt_number": iteration.attempt_number,
             "query_sql": edited_sql,
@@ -419,7 +428,7 @@ async def _handle_edit(
     return {
         "action": "edit",
         "status": status,
-        "request_status": str(req.status),
+        "request_status": "open",
         "iteration_id": str(new_iter.id),
         "attempt_number": new_iter.attempt_number,
         "query_sql": edited_sql,
@@ -460,7 +469,8 @@ def _build_regen_context(req: Request, latest_comment: str | None) -> str:
             # Attach feedback for this iteration
             if it.feedbacks:
                 for fb in it.feedbacks:
-                    parts.append(f"User feedback ({fb.action.value}): {fb.comment or 'No comment'}")
+                    action_str = fb.action.value if hasattr(fb.action, "value") else str(fb.action)
+                    parts.append(f"User feedback ({action_str}): {fb.comment or 'No comment'}")
                     if fb.edited_sql:
                         parts.append(f"User edited SQL: {fb.edited_sql}")
             parts.append("")
