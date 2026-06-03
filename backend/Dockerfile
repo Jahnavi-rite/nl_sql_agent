@@ -21,4 +21,6 @@ COPY . .
 EXPOSE 8000
 
 # Run with uvicorn
-CMD ["uv", "run", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+RUN uv sync --frozen --no-dev && echo "uv sync done"
+
+CMD [".venv/bin/python", "-m", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
