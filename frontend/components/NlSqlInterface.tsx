@@ -76,6 +76,15 @@ export default function NlSqlInterface() {
     setRejectComment("");
   }
 
+  function handleDialectChange(d: SandboxDialect) {
+    setDialect(d);
+    if (d === "oracle") {
+      setResult(null);
+      setError(null);
+      resetFeedbackState();
+    }
+  }
+
   async function handleSubmit() {
     if (!prompt.trim()) return;
 
@@ -277,7 +286,7 @@ export default function NlSqlInterface() {
                     : "text-gray-300 hover:bg-gray-800"
                 }`}
                 disabled={isRunning}
-                onClick={() => setDialect(d)}
+                onClick={() => handleDialectChange(d)}
                 type="button"
               >
                 {d}
