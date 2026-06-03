@@ -14,6 +14,8 @@ import {
   type SandboxDialect,
   type SchemaTable,
 } from "@/lib/api";
+import AgentTimeline from "@/components/AgentTimeline";
+import { useAgentStream } from "@/lib/useAgentStream";
 
 interface SchemaInfo {
   name: string;
@@ -220,6 +222,9 @@ export default function NlSqlInterface() {
     }
   }
 
+  const { events: agentEvents, connected: streamConnected, reconnecting: streamReconnecting, isPolling: streamIsPolling } =
+    useAgentStream(isRunning ? sessionId : null, requestId);
+
   const latestIteration = iterations.length > 0 ? iterations[iterations.length - 1] : null;
   const isApproved = requestStatus === "approved";
   const isCapped = requestStatus === "needs_human_intervention";
@@ -310,7 +315,18 @@ export default function NlSqlInterface() {
       </div>
 
       {error ? <ErrorState message={error} /> : null}
-      {isRunning ? <RunningState /> : null}
+      {isRunning ? (
+        <div className="space-y-4">
+          <AgentTimeline
+            events={agentEvents}
+            connected={streamConnected}
+            reconnecting={streamReconnecting}
+            isPolling={streamIsPolling}
+            visible={true}
+          />
+          {agentEvents.length === 0 ? <RunningState /> : null}
+        </div>
+      ) : null}
       {result ? (
         <ResultView
           result={result}

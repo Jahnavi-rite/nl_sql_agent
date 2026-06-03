@@ -15,8 +15,15 @@ function getApiUrl() {
     const host = window.location.hostname === "localhost" ? "127.0.0.1" : window.location.hostname;
     return `${window.location.protocol}//${host}:8000`;
   }
-
   return "http://127.0.0.1:8000";
+}
+
+export function getWsUrl(): string {
+  if (typeof window !== "undefined") {
+    const host = window.location.hostname === "localhost" ? "127.0.0.1" : window.location.hostname;
+    return `ws://${host}:8000`;
+  }
+  return "ws://127.0.0.1:8000";
 }
 
 const REQUEST_TIMEOUT_MS = 10_000;

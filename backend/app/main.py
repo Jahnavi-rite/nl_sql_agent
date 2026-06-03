@@ -29,11 +29,13 @@ from app.api.health import router as health_router
 from app.api.requests import router as requests_router
 from app.api.sandbox import router as sandbox_router
 from app.api.schema import router as schema_router
+from app.api.stream import router as stream_router
 from app.api.validate import router as validate_router
 from app.core.config import settings
 from app.core.database import engine
 from app.core.logging import setup_logging
 from app.core.redis import redis_client
+from app.services.stream_manager import stream_manager
 
 # Initialize structured logging
 setup_logging(settings.LOG_LEVEL)
@@ -104,10 +106,15 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     except Exception as exc:
         logger.warning("startup_ingestion_error", error=str(exc))
 
+    # Start WebSocket stream manager cleanup task
+    await stream_manager.start_cleanup_task()
+    logger.info("stream_manager_cleanup_started")
+
     logger.info("app_ready", path="/health", port=settings.BACKEND_PORT)
     yield  # App is running
 
     # --- Shutdown ---
+    await stream_manager.stop_cleanup_task()
     await engine.dispose()
     await redis_client.aclose()
     logger.info("app_shutting_down")
@@ -143,5 +150,6 @@ app.include_router(feedback_router)
 app.include_router(health_router)
 app.include_router(sandbox_router)
 app.include_router(schema_router)
+app.include_router(stream_router)
 app.include_router(validate_router)
 app.include_router(requests_router)
