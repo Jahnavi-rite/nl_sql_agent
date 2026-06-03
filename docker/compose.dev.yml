@@ -72,6 +72,26 @@ services:
       - nlsql-network
 
   # ---------------------------------------------------------------------------
+  # Langfuse — LLM prompt/response tracing
+  # ---------------------------------------------------------------------------
+  langfuse:
+    image: langfuse/langfuse:latest
+    container_name: nlsql-langfuse
+    restart: unless-stopped
+    ports:
+      - "3030:3000"     # UI
+    environment:
+      DATABASE_URL: postgresql://nlsql:nlsql_dev_password@postgres:5432/nlsql_agent
+      NEXTAUTH_SECRET: nlsql-langfuse-secret-key-change-in-prod
+      SALT: nlsql-langfuse-salt-change-in-prod
+      ENCRYPTION_KEY: 0000000000000000000000000000000000000000000000000000000000000000
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - nlsql-network
+
+  # ---------------------------------------------------------------------------
   # Backend — FastAPI application
   # ---------------------------------------------------------------------------
   backend:
@@ -88,6 +108,8 @@ services:
       SANDBOX_ATTACH_CONTAINER: nlsql-backend
       OTLP_ENDPOINT: http://jaeger:4317
       OTLP_ENABLED: "true"
+      LANGFUSE_HOST: http://langfuse:3000
+      LANGFUSE_ENABLED: "true"
     ports:
       - "${BACKEND_PORT:-8000}:8000"
     volumes:

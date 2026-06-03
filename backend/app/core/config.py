@@ -82,6 +82,12 @@ class Settings(BaseSettings):
     RATE_LIMIT_SESSION_REQUESTS_PER_MINUTE: int = 10
     RATE_LIMIT_WS_PER_SESSION: int = 5
 
+    # --- Langfuse ---
+    LANGFUSE_PUBLIC_KEY: str = ""
+    LANGFUSE_SECRET_KEY: str = ""
+    LANGFUSE_HOST: str = "http://langfuse:3000"
+    LANGFUSE_ENABLED: bool = True
+
     # --- Maintenance ---
     MAINTENANCE_MODE: bool = False
 

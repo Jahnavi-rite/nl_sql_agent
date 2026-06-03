@@ -30,6 +30,7 @@ dependencies = [
     "opentelemetry-instrumentation-sqlalchemy>=0.48,<1",
     "opentelemetry-exporter-otlp-proto-grpc>=1.27,<2",
     "prometheus-client>=0.20,<1",
+    "langfuse>=2.55,<3",
 ]
 
 [project.optional-dependencies]
