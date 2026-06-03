@@ -42,6 +42,7 @@ class FeedbackResponse(BaseModel):
     execution_ms: float | None = None
     error_message: str | None = None
     needs_human_intervention: bool = False
+    is_manual_edit: bool = False
     latency_ms: float | None = None
 
 
@@ -92,5 +93,6 @@ async def submit_feedback(
         execution_ms=result.get("execution_ms"),
         error_message=result.get("error_message"),
         needs_human_intervention=result.get("needs_human_intervention", False),
+        is_manual_edit=result.get("is_manual_edit", False),
         latency_ms=result.get("latency_ms"),
     )

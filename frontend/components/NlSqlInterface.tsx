@@ -454,9 +454,20 @@ function ResultView({
         </div>
       ) : null}
 
+      {/* Source indicator */}
+      {latestIteration?.is_manual_edit === true ? (
+        <div className="rounded-md border border-amber-700 bg-amber-950/30 p-2 text-xs text-amber-200">
+          Manually edited SQL — executed without LLM
+        </div>
+      ) : latestIteration ? (
+        <div className="rounded-md border border-cyan-700 bg-cyan-950/20 p-2 text-xs text-cyan-200">
+          AI-generated SQL — produced by LLM
+        </div>
+      ) : null}
+
       {/* Query and rationale */}
       <div className="grid gap-4 lg:grid-cols-2">
-        <Block title="Generated Query SQL" language="sql" code={result.query_sql} />
+        <Block title={latestIteration?.is_manual_edit === true ? "Edited Query SQL" : "Generated Query SQL"} language="sql" code={result.query_sql} />
         {result.rationale ? <Block title="Rationale" code={result.rationale} /> : null}
       </div>
 
@@ -634,7 +645,7 @@ function FeedbackControls({
       {feedbackLoading ? (
         <div className="flex items-center gap-2 text-xs text-gray-400">
           <div className="h-4 w-4 animate-spin rounded-full border-2 border-gray-700 border-t-cyan-400" />
-          Processing feedback...
+          {rejectMode && !editMode ? "Regenerating SQL with feedback context..." : editMode && !rejectMode ? "Validating and executing edited SQL..." : "Processing feedback..."}
         </div>
       ) : null}
     </div>
@@ -659,6 +670,7 @@ function IterationHistory({ iterations }: { iterations: IterationDetail[] }) {
         <div className="space-y-3">
           {[...iterations].reverse().map((it, idx) => {
             const isLatest = idx === 0;
+            const isManual = it.is_manual_edit === true;
             return (
               <div
                 key={it.iteration_id}
@@ -674,17 +686,28 @@ function IterationHistory({ iterations }: { iterations: IterationDetail[] }) {
                       Attempt {it.attempt_number}
                     </span>
                     <StatusBadge status={it.status} />
-                    {it.feedback_action ? (
+                    {isManual ? (
+                      <span className="rounded border border-amber-600 bg-amber-950/40 px-1.5 py-0.5 text-amber-300">
+                        Manual edit
+                      </span>
+                    ) : (
+                      <span className="rounded border border-cyan-700 bg-cyan-950/30 px-1.5 py-0.5 text-cyan-300">
+                        AI-generated
+                      </span>
+                    )}
+                    {it.feedback_action && it.feedback_action !== "edit" ? (
                       <span className="rounded bg-gray-700 px-1.5 py-0.5 text-gray-300">
                         {it.feedback_action}
                       </span>
                     ) : null}
                   </div>
-                  {it.created_at ? (
-                    <span className="text-gray-500">
-                      {new Date(it.created_at).toLocaleTimeString()}
-                    </span>
-                  ) : null}
+                  <div className="flex items-center gap-2">
+                    {it.created_at ? (
+                      <span className="text-gray-500">
+                        {new Date(it.created_at).toLocaleTimeString()}
+                      </span>
+                    ) : null}
+                  </div>
                 </div>
 
                 <pre className="mb-2 max-h-32 overflow-auto whitespace-pre-wrap break-words rounded bg-gray-800 p-2 font-mono text-gray-300">
@@ -702,7 +725,7 @@ function IterationHistory({ iterations }: { iterations: IterationDetail[] }) {
                 </div>
 
                 {it.rationale ? (
-                  <div className="mt-1 text-gray-500">{it.rationale}</div>
+                  <div className="mt-1 text-gray-500 italic">{it.rationale}</div>
                 ) : null}
 
                 {it.feedback_comment ? (
@@ -713,7 +736,10 @@ function IterationHistory({ iterations }: { iterations: IterationDetail[] }) {
                 ) : null}
 
                 {it.error_message ? (
-                  <div className="mt-1 text-red-400">{it.error_message}</div>
+                  <div className="mt-1 rounded border border-red-800 bg-red-950/30 p-2 text-red-300">
+                    <span className="font-semibold text-red-400">Error: </span>
+                    {it.error_message}
+                  </div>
                 ) : null}
               </div>
             );

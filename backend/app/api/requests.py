@@ -117,6 +117,7 @@ async def get_request_details(
                 error_message=it.error_message,
                 feedback_action=str(fb.action) if fb else None,
                 feedback_comment=fb.comment if fb else None,
+                is_manual_edit=it.is_manual_edit,
                 created_at=it.created_at,
             )
         )
@@ -178,6 +179,7 @@ async def list_session_requests(
                     error_message=it.error_message,
                     feedback_action=str(fb.action) if fb else None,
                     feedback_comment=fb.comment if fb else None,
+                    is_manual_edit=it.is_manual_edit,
                     created_at=it.created_at,
                 )
             )

@@ -143,6 +143,7 @@ class Iteration(UUIDMixin, TimestampMixin, Base):
     execution_rows: Mapped[int | None] = mapped_column(Integer, nullable=True)
     execution_ms: Mapped[float | None] = mapped_column(Float, nullable=True)
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    is_manual_edit: Mapped[bool] = mapped_column(nullable=False, default=False)
 
     # --- relationships ---
     request: Mapped[Request] = relationship(back_populates="iterations")

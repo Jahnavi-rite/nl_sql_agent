@@ -62,6 +62,7 @@ class IterationDetail(BaseModel):
     error_message: str | None = None
     feedback_action: str | None = None
     feedback_comment: str | None = None
+    is_manual_edit: bool = False
     created_at: datetime | None = None
 
 

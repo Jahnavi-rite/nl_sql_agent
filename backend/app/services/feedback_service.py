@@ -153,8 +153,19 @@ async def _handle_reject(
     start_time: float,
 ) -> dict[str, Any]:
     """Regenerate SQL using accumulated context from all prior iterations."""
-    # Check iteration cap
     current_count = await count_iterations(db, req.id)
+    logger.info(
+        "reject_triggered",
+        request_id=str(req.id),
+        iteration_id=str(iteration.id),
+        attempt=iteration.attempt_number,
+        total_iterations=current_count,
+        max_iterations=5,
+        has_comment=bool(comment),
+        comment_preview=(comment[:200] if comment else None),
+    )
+
+    # Check iteration cap
     if current_count >= 5:
         iter_id = str(iteration.id)
         await update_request_status(db, req.id, RequestStatus.NEEDS_INTERVENTION)
@@ -163,6 +174,8 @@ async def _handle_reject(
             "iteration_cap_reached",
             request_id=str(req.id),
             max_iterations=5,
+            current_count=current_count,
+            latency_ms=round(elapsed, 1),
         )
         return {
             "action": "reject",
@@ -177,14 +190,23 @@ async def _handle_reject(
         }
 
     # Build regeneration context from previous iterations
-    regen_context = _build_regen_context(req, comment)
+    regen_context = _build_regen_context(req, comment, dialect)
+
+    # Check if feedback references schema/data issues — if so, reload schema metadata
     schema_description = get_schema_description()
+    if comment and _references_schema_or_data(comment, schema_description):
+        logger.info(
+            "regen_reloading_schema",
+            request_id=str(req.id),
+            reason="Feedback references schema or data issues",
+        )
 
     logger.info(
         "regen_started",
         request_id=str(req.id),
         previous_attempts=current_count,
         feedback=comment or "",
+        context_length=len(regen_context),
     )
 
     # Call LLM with accumulated context
@@ -213,7 +235,13 @@ async def _handle_reject(
     except UnsafeSQLError as exc:
         elapsed = (time.perf_counter() - start_time) * 1000
         reasons = "; ".join(exc.reasons)
-        logger.error("regen_validation_failed", request_id=str(req.id), reasons=exc.reasons)
+        logger.error(
+            "regen_validation_failed",
+            request_id=str(req.id),
+            reasons=exc.reasons,
+            generated_sql_preview=agent_response.query_sql[:200],
+            latency_ms=round(elapsed, 1),
+        )
         # Still save the iteration so user can see what was generated
         new_iter = await append_iteration(
             db, request_id=req.id,
@@ -344,6 +372,14 @@ async def _handle_edit(
     if not edited_sql or not edited_sql.strip():
         raise FeedbackError("edited_sql is required for edit action")
 
+    logger.info(
+        "edit_triggered",
+        request_id=str(req.id),
+        iteration_id=str(iteration.id),
+        attempt=iteration.attempt_number,
+        edited_sql_preview=edited_sql[:200],
+    )
+
     # Validate the edited SQL
     try:
         validate_or_raise(edited_sql, dialect, ValidationMode.QUERY_UNDER_TEST)
@@ -353,6 +389,7 @@ async def _handle_edit(
             "edit_validation_failed",
             request_id=str(req.id),
             reasons=exc.reasons,
+            latency_ms=round(elapsed, 1),
         )
         return {
             "action": "edit",
@@ -406,6 +443,7 @@ async def _handle_edit(
     new_iter.execution_rows = row_count
     new_iter.execution_ms = query_ms if status == "completed" else None
     new_iter.error_message = execution_error
+    new_iter.is_manual_edit = True
     await db.commit()
 
     await record_trace(
@@ -443,8 +481,24 @@ async def _handle_edit(
     }
 
 
-def _build_regen_context(req: Request, latest_comment: str | None) -> str:
-    """Build a regeneration context string from all previous iterations."""
+def _references_schema_or_data(comment: str, schema_description: str) -> bool:
+    """Check if user feedback references schema or data issues that require schema reload."""
+    schema_keywords = [
+        "table", "column", "schema", "field", "attribute", "column name",
+        "missing table", "wrong table", "typo", "doesn't exist", "not found",
+        "misspelled", "incorrect name", "wrong column",
+    ]
+    comment_lower = comment.lower()
+    return any(kw in comment_lower for kw in schema_keywords)
+
+
+def _build_regen_context(req: Request, latest_comment: str | None, dialect: str = "postgres") -> str:
+    """Build a regeneration context string from all previous iterations.
+
+    Includes full iteration memory: previous SQL attempts, rationales,
+    confidence scores, validation failures, execution results, user comments,
+    and explicit instructions on what should change.
+    """
     parts: list[str] = []
     parts.append("=== ORIGINAL REQUEST ===")
     parts.append(req.question)
@@ -459,10 +513,18 @@ def _build_regen_context(req: Request, latest_comment: str | None) -> str:
                 parts.append(f"Rationale: {it.rationale}")
             if it.confidence is not None:
                 parts.append(f"Confidence: {it.confidence}")
+            if it.is_manual_edit:
+                parts.append("Source: Manually edited by user (not AI-generated)")
+            else:
+                parts.append("Source: AI-generated")
             if it.execution_rows is not None:
                 parts.append(f"Results: {it.execution_rows} rows returned")
             if it.execution_ms is not None:
                 parts.append(f"Execution time: {it.execution_ms:.0f}ms")
+            if it.validation_passed is not None:
+                parts.append(f"Validation passed: {it.validation_passed}")
+            if it.validation_reasons:
+                parts.append(f"Validation details: {'; '.join(it.validation_reasons)}")
             if it.error_message:
                 parts.append(f"Error: {it.error_message}")
 
@@ -485,6 +547,14 @@ def _build_regen_context(req: Request, latest_comment: str | None) -> str:
     parts.append("The new query should address the user's feedback and fix any issues from prior attempts.")
     if latest_comment:
         parts.append(f"Key feedback to address: {latest_comment}")
-    parts.append("Output ONLY the JSON object with query_sql, confidence, and rationale.")
+    parts.append("")
+    parts.append("CRITICAL RULES:")
+    parts.append("- Output ONLY valid JSON with keys: query_sql, confidence, rationale")
+    parts.append("- query_sql must be a single SELECT statement (no DDL, DML, or multiple statements)")
+    parts.append("- Do NOT use comments (-- or /* */) in SQL")
+    parts.append("- Do NOT reference system tables (pg_catalog, information_schema, etc.)")
+    parts.append("- If previous attempts had errors, CRITICALLY review the SQL for those issues")
+    parts.append("- If the user provided specific feedback, PRIORITIZE addressing it")
+    parts.append(f"- Target database dialect: {dialect}")
 
     return "\n".join(parts)
