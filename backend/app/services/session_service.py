@@ -233,6 +233,7 @@ async def append_iteration(
     rationale: str | None = None,
     critic_score: float | None = None,
     critic_notes: str | None = None,
+    debate_transcript: dict[str, Any] | None = None,
     status: IterationStatus = IterationStatus.PENDING,
     supersede_previous: bool = False,
 ) -> Iteration:
@@ -278,6 +279,7 @@ async def append_iteration(
         rationale=rationale,
         critic_score=critic_score,
         critic_notes=critic_notes,
+        debate_transcript_json=debate_transcript,
     )
     db.add(iteration)
     await db.commit()

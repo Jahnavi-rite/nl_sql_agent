@@ -102,11 +102,11 @@ async def _call_llm(messages: list[dict[str, str]]) -> str:
             content: str = data["choices"][0]["message"]["content"]
             return content
     except httpx.TimeoutException:
-        raise LLMError(f"LLM request timed out after {settings.LLM_TIMEOUT_SECONDS}s") from None
+        raise LLMError(f"LLM request timed out after {settings.LLM_TIMEOUT_SECONDS}s — check OPENAI_API_BASE={settings.OPENAI_API_BASE} and network connectivity") from None
     except httpx.HTTPStatusError as exc:
-        raise LLMError(f"LLM API returned {exc.response.status_code}: {exc.response.text[:500]}") from exc
+        raise LLMError(f"LLM API returned {exc.response.status_code} from {base_url}: {exc.response.text[:500]} — check OPENAI_API_BASE and API key") from exc
     except (httpx.RequestError, KeyError, json.JSONDecodeError) as exc:
-        raise LLMError(f"LLM request failed: {exc}") from exc
+        raise LLMError(f"LLM request to {base_url} failed: {exc} — check OPENAI_API_BASE, network, and server availability") from exc
 
 
 def _extract_json(raw: str) -> dict[str, Any]:

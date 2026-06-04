@@ -137,6 +137,7 @@ class Iteration(UUIDMixin, TimestampMixin, Base):
     rationale: Mapped[str | None] = mapped_column(Text, nullable=True)
     critic_score: Mapped[float | None] = mapped_column(Float, nullable=True)
     critic_notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    debate_transcript_json: Mapped[dict[str, Any] | None] = mapped_column(JSONBCompat, nullable=True)
     validation_passed: Mapped[bool | None] = mapped_column(nullable=True)
     validation_reasons: Mapped[list[str] | None] = mapped_column(JSONBCompat, nullable=True)
     explain_plan: Mapped[dict[str, Any] | None] = mapped_column(JSONBCompat, nullable=True)

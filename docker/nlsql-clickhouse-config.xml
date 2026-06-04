@@ -1,0 +1,12 @@
+<clickhouse>
+    <zookeeper>
+        <node index="1">
+            <host>nlsql-zookeeper</host>
+            <port>2181</port>
+        </node>
+    </zookeeper>
+    <macros>
+        <shard>1</shard>
+        <replica>1</replica>
+    </macros>
+</clickhouse>

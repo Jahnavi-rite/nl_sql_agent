@@ -1,9 +1,8 @@
 from __future__ import annotations
 
 import time
-from dataclasses import dataclass, field, asdict
+from dataclasses import asdict, dataclass, field
 from typing import Any
-
 
 AGENT_NAMES = [
     "intent_analyst",
@@ -12,6 +11,8 @@ AGENT_NAMES = [
     "test_executor",
     "critic",
     "debate",
+    "debateauthor",
+    "debatecritic",
 ]
 
 PHASE_START = "start"
@@ -124,6 +125,41 @@ def make_error(
         partial_text=partial_text,
         status=status or f"Error in {agent.replace('_', ' ').title()}",
         request_id=request_id,
+    )
+
+
+def make_debate_round(
+    round_number: int,
+    speaker: str,
+    sql_candidate: str = "",
+    scores: dict[str, float] | None = None,
+    objections: list[str] | None = None,
+    approved: bool | None = None,
+    confidence: float | None = None,
+    rationale: str = "",
+    query_hash: str = "",
+    status: str = "",
+    request_id: str = "",
+) -> AgentEvent:
+    scores = scores or {}
+    objections = objections or []
+    return AgentEvent(
+        agent=speaker.lower().replace("debate", "debate"),
+        phase=PHASE_PROGRESS,
+        artifact={
+            "round": round_number,
+            "speaker": speaker,
+            "sql_candidate": sql_candidate,
+            "scores": scores,
+            "objections": objections,
+            "approved": approved,
+            "confidence": confidence,
+            "rationale": rationale[:500],
+            "query_hash": query_hash,
+        },
+        status=status or f"Round {round_number} — {speaker}",
+        request_id=request_id,
+        progress_percent=round((round_number / 3) * 100, 1),
     )
 
 

@@ -15,12 +15,33 @@ import {
   type SchemaTable,
 } from "@/lib/api";
 import AgentTimeline from "@/components/AgentTimeline";
+import DebateView from "@/components/DebateView";
 import { useAgentStream } from "@/lib/useAgentStream";
 
 interface SchemaInfo {
   name: string;
   rows: number;
   columns: number;
+}
+
+interface DebateTranscriptUI {
+  turns: Array<{
+    round_number: number;
+    speaker: string;
+    timestamp: number;
+    sql_candidate: string;
+    query_hash: string;
+    scores: Record<string, number>;
+    objections: string[];
+    rationale: string;
+    confidence: number | null;
+    approved: boolean | null;
+    token_usage: Record<string, number>;
+    latency_ms: number;
+    content: string;
+  }>;
+  summary: Record<string, unknown>;
+  rounds?: Array<Record<string, unknown>>;
 }
 
 export default function NlSqlInterface() {
@@ -554,6 +575,8 @@ function ResultView({
       {/* Iteration history */}
       {iterations.length > 1 ? <IterationHistory iterations={iterations} /> : null}
 
+      <DebateSection result={result} latestIteration={latestIteration} />
+
       {/* New query button */}
       <div className="flex justify-end border-t border-gray-700 pt-3">
         <button
@@ -567,6 +590,31 @@ function ResultView({
     </div>
   );
 }
+
+function DebateSection({ result, latestIteration }: { result: CreateNLResponse; latestIteration: IterationDetail | null }) {
+  const [expanded, setExpanded] = useState(false);
+
+  const transcript = result.debate_transcript_json ?? latestIteration?.debate_transcript_json ?? null;
+
+  if (!transcript) return null;
+
+  return (
+    <div className="space-y-2">
+      <button
+        className="flex w-full items-center justify-between rounded-md border border-indigo-700 bg-gray-950 px-4 py-2 text-sm font-medium text-indigo-300 transition hover:bg-indigo-950/50"
+        onClick={() => setExpanded(!expanded)}
+        type="button"
+      >
+        <span>Show Debate</span>
+        <span className="text-xs text-indigo-400">{expanded ? "Hide" : "Show"}</span>
+      </button>
+      {expanded ? (
+        <DebateView transcript={transcript as DebateTranscriptUI} />
+      ) : null}
+    </div>
+  );
+}
+
 
 function FeedbackControls({
   feedbackLoading,

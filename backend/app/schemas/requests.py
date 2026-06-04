@@ -41,6 +41,7 @@ class CreateNLResponse(BaseModel):
     query_sql: str
     confidence: float | None = None
     rationale: str | None = None
+    debate_transcript_json: dict[str, Any] | None = None
     execution_results: list[dict[str, Any]] = Field(default_factory=list)
     execution_rows: int = 0
     execution_ms: float | None = None
@@ -55,7 +56,9 @@ class IterationDetail(BaseModel):
     status: str
     generated_sql: str
     confidence: float | None = None
+    critic_score: float | None = None
     rationale: str | None = None
+    debate_transcript_json: dict[str, Any] | None = None
     execution_results: list[dict[str, Any]] | None = None
     execution_rows: int | None = None
     execution_ms: float | None = None
@@ -72,7 +75,9 @@ class GetRequestResponse(BaseModel):
     question: str
     generated_sql: str
     confidence: float | None = None
+    critic_score: float | None = None
     rationale: str | None = None
+    debate_transcript_json: dict[str, Any] | None = None
     execution_results: list[dict[str, Any]] | None = None
     execution_rows: int | None = None
     execution_ms: float | None = None

@@ -9,12 +9,14 @@ import structlog
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.agents.single_shot import AgentError, AgentResponse
-from app.agents.single_shot import generate as llm_generate
+from app.agents.crew_setup import create_nl_sql_crew, extract_sql_from_tasks
+from app.agents.debate.debate_runner import run_debate
+from app.agents.debate.models import DebateResult
+from app.agents.single_shot import AgentResponse
 from app.core.config import settings
 from app.core.database import engine as async_engine
 from app.models.enums import IterationStatus
-from app.models.session import Iteration
+from app.models.session import Iteration, Session
 from app.services.session_service import append_iteration, create_request, record_trace
 from app.services.startup_ingestion import get_schema_description
 from app.services.stream_events import (
@@ -59,15 +61,8 @@ async def execute_nl_pipeline(
         request_id=rid,
         dialect=dialect_str,
         prompt_preview=prompt[:100],
+        debate_enabled=settings.ENABLE_DEBATE,
     )
-
-    _emit(sid, make_start("intent_analyst", f"Analyzing request: {prompt[:80]}...", rid))
-
-    _emit(sid, make_progress("intent_analyst", 50.0, "Parsing natural language intent...", request_id=rid))
-
-    _emit(sid, make_complete("intent_analyst", {"prompt": prompt[:200], "dialect": dialect_str}, f"Intent recognized: {prompt[:60]}...", rid))
-
-    _emit(sid, make_start("schema_designer", "Loading database schema...", rid))
 
     schema_description = get_schema_description()
     if not schema_description:
@@ -76,6 +71,7 @@ async def execute_nl_pipeline(
         return _build_error_result(sid, rid, prompt, "No database schema available. Ensure CSV files were ingested at startup.")
 
     schema_tables = _extract_table_names(schema_description)
+    _emit(sid, make_start("schema_designer", "Loading database schema...", rid))
     _emit(sid, make_progress("schema_designer", 100.0, f"Loaded schema with {len(schema_tables)} tables", rid))
     _emit(sid, make_artifact("schema_designer", {"tables": schema_tables, "description_length": len(schema_description)}, f"Schema loaded: {len(schema_tables)} tables available", rid))
     logger.info("schema_loaded", request_id=rid, description_length=len(schema_description))
@@ -88,47 +84,203 @@ async def execute_nl_pipeline(
     )
     req_id = req.id
 
-    _emit(sid, make_start("query_author", "Generating SQL...", rid))
-    _emit(sid, make_progress("query_author", 10.0, "Calling LLM to generate SQL...", rid))
+    _emit(sid, make_start("pipeline", "Starting pipeline...", rid))
 
     try:
-        agent_response = await _call_agent(prompt, dialect_str, schema_description, rid)
-        _emit(sid, make_progress("query_author", 90.0, "SQL generated, validating...", rid))
-        _emit(sid, make_partial_output("query_author", agent_response.query_sql, f"Generated SQL ({len(agent_response.query_sql)} chars)", rid))
-    except AgentError as exc:
-        _emit(sid, make_error("query_author", str(exc), f"SQL generation failed: {exc}", rid))
+        if settings.ENABLE_DEBATE:
+            result = await _run_debate_pipeline(
+                db, sid, rid, req_id, prompt, dialect_str, schema_description
+            )
+        else:
+            result = await _run_crewai_pipeline(
+                db, sid, rid, req_id, prompt, dialect_str, schema_description
+            )
+    except Exception as exc:
+        _emit(sid, make_error("pipeline", str(exc), f"Pipeline failed: {exc}", rid))
         result = _build_error_result(sid, rid, prompt, str(exc))
         result["request_id"] = str(req_id)
         await _save_failed_iteration(db, req_id, prompt, str(exc), rid, dialect_str)
-        logger.error("llm_failed", request_id=rid, error=str(exc))
         stream_manager.mark_done(sid)
+        logger.error("pipeline_failed", request_id=rid, error=str(exc), stage="top")
         return result
 
-    _emit(sid, make_complete("query_author", {"sql": agent_response.query_sql, "confidence": agent_response.confidence}, f"SQL generated (confidence: {agent_response.confidence:.0%})", rid))
+    result["request_id"] = str(req_id)
+    pipeline_ms = (time.perf_counter() - pipeline_start) * 1000
+    logger.info(
+        "pipeline_completed",
+        request_id=rid,
+        status=result.get("status"),
+        latency_ms=round(pipeline_ms, 1),
+        debate=settings.ENABLE_DEBATE,
+    )
+
+    stream_manager.mark_done(sid)
+    return result
+
+
+async def _run_crewai_pipeline(
+    db: AsyncSession,
+    sid: str,
+    rid: str,
+    req_id: uuid.UUID,
+    prompt: str,
+    dialect: str,
+    schema_description: str,
+) -> dict[str, Any]:
+    _emit(sid, make_start("pipeline", "Starting CrewAI multi-agent pipeline...", rid))
+
+    try:
+        crew = create_nl_sql_crew(schema_metadata=schema_description, sid=sid, rid=rid)
+        crew_result = await crew.kickoff_async(inputs={
+            "user_prompt": prompt,
+            "dialect": dialect,
+            "schema": schema_description,
+        })
+    except Exception as exc:
+        _emit(sid, make_error("pipeline", str(exc), f"CrewAI pipeline failed: {exc}", rid))
+        raise
+
+    tasks_output = getattr(crew_result, "tasks_output", [])
+    generated_sql = extract_sql_from_tasks(tasks_output)
+
+    if not generated_sql:
+        _emit(sid, make_error("query_author", "No SQL generated by agents", request_id=rid))
+        result = _build_base_result(sid, rid, prompt)
+        result.update({
+            "request_id": str(req_id),
+            "query_sql": "",
+            "confidence": None,
+            "rationale": None,
+            "error_message": "No SQL was generated by the agent pipeline.",
+        })
+        await _save_failed_iteration(db, req_id, prompt, "No SQL was generated by the agent pipeline.", rid, dialect)
+        return result
+
+    intent_rationale = tasks_output[0].raw if len(tasks_output) > 0 else "Intent analysis unavailable"
+
+    agent_response = AgentResponse(
+        query_sql=generated_sql,
+        confidence=0.85,
+        rationale=intent_rationale[:500],
+    )
+
+    _emit(sid, make_partial_output("query_author", agent_response.query_sql, f"Generated SQL ({len(agent_response.query_sql)} chars)", rid))
 
     _emit(sid, make_start("critic", "Validating SQL safety...", rid))
     _emit(sid, make_progress("critic", 30.0, "Running AST-based SQL validation...", rid))
 
+    validation_error: str | None = None
     try:
-        validate_or_raise(agent_response.query_sql, dialect_str, ValidationMode.QUERY_UNDER_TEST)
+        validate_or_raise(agent_response.query_sql, dialect, ValidationMode.QUERY_UNDER_TEST)
         _emit(sid, make_progress("critic", 100.0, "SQL validation passed", rid))
-        _emit(sid, make_complete("critic", {"validation": "passed", "dialect": dialect_str}, "SQL validation passed", rid))
+        _emit(sid, make_complete("critic", {"validation": "passed", "dialect": dialect}, "SQL validation passed", rid))
     except UnsafeSQLError as exc:
-        error_msg = f"SQL validation failed: {'; '.join(exc.reasons)}"
-        _emit(sid, make_error("critic", error_msg, f"Validation failed: {'; '.join(exc.reasons)}", rid))
+        validation_error = f"SQL validation failed: {'; '.join(exc.reasons)}"
+        _emit(sid, make_error("critic", validation_error, f"Validation failed: {'; '.join(exc.reasons)}", rid))
         result = _build_base_result(sid, rid, prompt)
         result.update({
             "request_id": str(req_id),
             "query_sql": agent_response.query_sql,
             "confidence": agent_response.confidence,
             "rationale": agent_response.rationale,
-            "error_message": error_msg,
+            "error_message": validation_error,
         })
-        await _save_iteration(db, req_id, agent_response, error_msg, rid, dialect_str)
-        logger.error("validation_failed", request_id=rid, reasons=exc.reasons)
-        stream_manager.mark_done(sid)
+        await _save_iteration(db, req_id, agent_response, validation_error, rid, dialect)
         return result
 
+    return await _execute_query(
+        db, sid, rid, req_id, agent_response, dialect, prompt
+    )
+
+
+async def _run_debate_pipeline(
+    db: AsyncSession,
+    sid: str,
+    rid: str,
+    req_id: uuid.UUID,
+    prompt: str,
+    dialect: str,
+    schema_description: str,
+) -> dict[str, Any]:
+    _emit(sid, make_start("pipeline", "Starting AutoGen debate pipeline...", rid))
+    _emit(sid, make_progress("pipeline", 10.0, "Initializing DebateAuthor and DebateCritic agents", rid))
+
+    try:
+        debate_result = await run_debate(
+            prompt=prompt,
+            dialect=dialect,
+            schema_metadata=schema_description,
+            session_id=sid,
+            request_id=rid,
+            emit_event=_emit,
+        )
+    except Exception as exc:
+        _emit(sid, make_error("pipeline", str(exc), f"Debate pipeline failed: {exc}", rid))
+        raise
+
+    query_sql = debate_result.query_sql or ""
+    _emit(sid, make_progress("pipeline", 80.0, f"Debate completed ({debate_result.termination_reason}, {debate_result.rounds} rounds)", rid))
+    _emit(sid, make_partial_output("query_author", query_sql, f"Debate SQL ({len(query_sql)} chars)", rid))
+
+    if not query_sql:
+        _emit(sid, make_error("query_author", "No SQL generated by debate", request_id=rid))
+        result = _build_base_result(sid, rid, prompt)
+        result.update({
+            "request_id": str(req_id),
+            "query_sql": "",
+            "confidence": None,
+            "rationale": debate_result.rationale,
+            "error_message": "No SQL was generated by the debate pipeline.",
+        })
+        await _save_debate_iteration(db, req_id, debate_result, "No SQL was generated by the debate pipeline.", rid, dialect)
+        return result
+
+    _emit(sid, make_start("critic", "Validating SQL safety...", rid))
+    _emit(sid, make_progress("critic", 30.0, "Running AST-based SQL validation...", rid))
+
+    validation_error: str | None = None
+    try:
+        validate_or_raise(query_sql, dialect, ValidationMode.QUERY_UNDER_TEST)
+        _emit(sid, make_progress("critic", 100.0, "SQL validation passed", rid))
+        _emit(sid, make_complete("critic", {"validation": "passed", "dialect": dialect}, "SQL validation passed", rid))
+    except UnsafeSQLError as exc:
+        validation_error = f"SQL validation failed: {'; '.join(exc.reasons)}"
+        _emit(sid, make_error("critic", validation_error, f"Validation failed: {'; '.join(exc.reasons)}", rid))
+        result = _build_base_result(sid, rid, prompt)
+        result.update({
+            "request_id": str(req_id),
+            "query_sql": query_sql,
+            "confidence": debate_result.final_confidence,
+            "rationale": debate_result.rationale,
+            "error_message": validation_error,
+            "debate_transcript": debate_result.debate_transcript,
+        })
+        await _save_debate_iteration(db, req_id, debate_result, validation_error, rid, dialect)
+        return result
+
+    agent_response = AgentResponse(
+        query_sql=query_sql,
+        confidence=debate_result.final_confidence,
+        rationale=debate_result.rationale,
+    )
+
+    return await _execute_query(
+        db, sid, rid, req_id, agent_response, dialect, prompt,
+        debate_result=debate_result,
+    )
+
+
+async def _execute_query(
+    db: AsyncSession,
+    sid: str,
+    rid: str,
+    req_id: uuid.UUID,
+    agent_response: AgentResponse,
+    dialect: str,
+    prompt: str,
+    *,
+    debate_result: DebateResult | None = None,
+) -> dict[str, Any]:
     _emit(sid, make_start("test_executor", "Executing query...", rid))
     _emit(sid, make_progress("test_executor", 10.0, "Running query against PostgreSQL...", rid))
 
@@ -136,6 +288,8 @@ async def execute_nl_pipeline(
     execution_error: str | None = None
     result = _build_base_result(sid, rid, prompt)
     result["request_id"] = str(req_id)
+    if debate_result:
+        result["debate_transcript"] = debate_result.debate_transcript
 
     try:
         async with async_engine.connect() as conn:
@@ -180,30 +334,13 @@ async def execute_nl_pipeline(
         })
         logger.error("execution_failed", request_id=rid, error=str(exc))
 
-    await _save_iteration(
-        db, req_id, agent_response, execution_error, rid, dialect_str,
-        result["execution_results"], result["execution_rows"],
-        result["execution_ms"], result["status"],
-    )
+    if debate_result:
+        await _save_debate_iteration(db, req_id, debate_result, execution_error, rid, dialect, result)
+    else:
+        await _save_iteration(db, req_id, agent_response, execution_error, rid, dialect)
 
-    pipeline_ms = (time.perf_counter() - pipeline_start) * 1000
-    logger.info(
-        "pipeline_completed",
-        request_id=rid,
-        status=result["status"],
-        latency_ms=round(pipeline_ms, 1),
-    )
-
-    _emit(sid, make_complete("critic", result, f"Pipeline complete ({result['status']})", rid))
-    stream_manager.mark_done(sid)
-
+    _emit(sid, make_complete("pipeline", result, f"Pipeline complete ({result['status']})", rid))
     return result
-
-
-async def _call_agent(
-    prompt: str, dialect: str, schema_metadata: str, rid: str
-) -> AgentResponse:
-    return await llm_generate(prompt, dialect, schema_metadata=schema_metadata, request_id=rid)
 
 
 async def _save_iteration(
@@ -238,13 +375,63 @@ async def _save_iteration(
     await record_trace(
         db,
         iteration_id=iteration.id,
-        agent_name="single_shot",
+        agent_name="crewai",
         prompt=f"Dialect: {dialect}\nRequest: {agent_response.rationale}",
         response=json.dumps({
             "query_sql": agent_response.query_sql,
             "confidence": agent_response.confidence,
             "rationale": agent_response.rationale,
         }),
+        model=settings.OPENAI_MODEL,
+    )
+
+    return iteration
+
+
+async def _save_debate_iteration(
+    db: AsyncSession,
+    req_id: uuid.UUID,
+    debate_result: DebateResult,
+    error_message: str | None,
+    rid: str,
+    dialect: str,
+    pipeline_result: dict[str, Any] | None = None,
+) -> Iteration:
+    iter_status = IterationStatus.EXECUTED
+    if error_message or pipeline_result and pipeline_result.get("status") != "completed":
+        iter_status = IterationStatus.FAILED
+
+    debate_transcript = debate_result.debate_transcript or {}
+
+    iteration = await append_iteration(
+        db,
+        request_id=req_id,
+        generated_sql=debate_result.query_sql,
+        confidence=debate_result.author_confidence,
+        rationale=debate_result.rationale,
+        critic_score=debate_result.critic_score,
+        critic_notes=debate_result.debate_transcript.get("summary", {}).get("termination_reason") if debate_result.debate_transcript else None,
+        debate_transcript=debate_transcript,
+        status=iter_status,
+    )
+
+    if pipeline_result:
+        iteration.execution_results = pipeline_result.get("execution_results")
+        iteration.execution_rows = pipeline_result.get("execution_rows")
+        iteration.execution_ms = pipeline_result.get("execution_ms")
+        iteration.error_message = error_message or pipeline_result.get("error_message")
+    else:
+        iteration.error_message = error_message
+
+    await db.commit()
+    await db.refresh(iteration)
+
+    await record_trace(
+        db,
+        iteration_id=iteration.id,
+        agent_name="debate",
+        prompt=f"Dialect: {dialect}\nRequest: {debate_result.rationale}",
+        response=json.dumps(debate_result.to_dict()),
         model=settings.OPENAI_MODEL,
     )
 
@@ -272,7 +459,7 @@ async def _save_failed_iteration(
     await record_trace(
         db,
         iteration_id=iteration.id,
-        agent_name="single_shot",
+        agent_name="pipeline",
         prompt=f"Dialect: {dialect}\nRequest: {prompt}",
         response=f"ERROR: {error_message}",
         model=settings.OPENAI_MODEL,

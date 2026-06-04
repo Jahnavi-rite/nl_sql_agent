@@ -4,14 +4,19 @@ import structlog
 from opentelemetry import trace
 from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
 from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
-from opentelemetry.instrumentation.httpx import HTTPXClientInstrumentor
-from opentelemetry.instrumentation.sqlalchemy import SQLAlchemyInstrumentor
+
+try:
+    from opentelemetry.instrumentation.httpx import HTTPXClientInstrumentor
+except ImportError:
+    HTTPXClientInstrumentor = None
+try:
+    from opentelemetry.instrumentation.sqlalchemy import SQLAlchemyInstrumentor
+except ImportError:
+    SQLAlchemyInstrumentor = None
 from opentelemetry.sdk.resources import Resource
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import BatchSpanProcessor
 from opentelemetry.sdk.trace.sampling import ParentBasedTraceIdRatio
-from starlette.middleware.base import RequestResponseEndpoint
-from starlette.requests import Request
 from starlette.types import ASGIApp
 
 from app.core.config import settings
@@ -50,10 +55,12 @@ def setup_telemetry(app: ASGIApp) -> None:
     _tracer = provider.get_tracer(__name__)
 
     FastAPIInstrumentor.instrument_app(app, tracer_provider=provider)
-    HTTPXClientInstrumentor().instrument()
+    if HTTPXClientInstrumentor is not None:
+        HTTPXClientInstrumentor().instrument()
     try:
         from app.core.database import engine
-        SQLAlchemyInstrumentor().instrument(engine=engine.sync_engine)
+        if SQLAlchemyInstrumentor is not None:
+            SQLAlchemyInstrumentor().instrument(engine=engine.sync_engine)
     except Exception:
         pass
 

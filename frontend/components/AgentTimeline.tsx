@@ -18,6 +18,8 @@ const AGENT_LABELS: Record<string, string> = {
   test_executor: "Executing Query",
   critic: "Reviewing Results",
   debate: "Debate (if enabled)",
+  debateauthor: "Debate Author",
+  debatecritic: "Debate Critic",
   polling: "Status Update",
 };
 
@@ -28,6 +30,8 @@ const AGENT_COLORS: Record<string, string> = {
   test_executor: "bg-green-500",
   critic: "bg-rose-500",
   debate: "bg-indigo-500",
+  debateauthor: "bg-indigo-400",
+  debatecritic: "bg-rose-400",
   polling: "bg-gray-500",
 };
 
@@ -38,6 +42,8 @@ const AGENT_BORDER_COLORS: Record<string, string> = {
   test_executor: "border-green-500",
   critic: "border-rose-500",
   debate: "border-indigo-500",
+  debateauthor: "border-indigo-400",
+  debatecritic: "border-rose-400",
   polling: "border-gray-500",
 };
 
@@ -54,7 +60,16 @@ interface AgentPhase {
 }
 
 function buildAgentPhases(events: AgentEvent[]): AgentPhase[] {
-  const agentOrder = ["intent_analyst", "schema_designer", "query_author", "test_executor", "critic", "debate"];
+  const agentOrder = [
+    "intent_analyst",
+    "schema_designer",
+    "query_author",
+    "test_executor",
+    "critic",
+    "debate",
+    "debateauthor",
+    "debatecritic",
+  ];
   const phases: Record<string, AgentPhase> = {};
 
   for (const agent of agentOrder) {

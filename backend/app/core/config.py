@@ -68,9 +68,12 @@ class Settings(BaseSettings):
     OPENAI_API_BASE: str = "https://api.openai.com/v1"
     LLM_TIMEOUT_SECONDS: int = 60
     LLM_TEMPERATURE: float = 0.1
+    ENABLE_DEBATE: bool = False
+    DEBATE_MAX_ROUNDS: int = 3
+    DEBATE_TOKEN_BUDGET: int = 6_000
 
     # --- OpenTelemetry / Jaeger ---
-    OTLP_ENDPOINT: str = "http://jaeger:4317"
+    OTLP_ENDPOINT: str = "http://nlsql-jaeger:4317"
     OTLP_SERVICE_NAME: str = "nl-sql-agent"
     OTLP_ENABLED: bool = True
 
@@ -85,7 +88,7 @@ class Settings(BaseSettings):
     # --- Langfuse ---
     LANGFUSE_PUBLIC_KEY: str = ""
     LANGFUSE_SECRET_KEY: str = ""
-    LANGFUSE_HOST: str = "http://langfuse:3000"
+    LANGFUSE_HOST: str = "http://nlsql-langfuse:3000"
     LANGFUSE_ENABLED: bool = True
 
     # --- Maintenance ---

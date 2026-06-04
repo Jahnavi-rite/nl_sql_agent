@@ -280,6 +280,7 @@ export interface CreateNLResponse {
   query_sql: string;
   confidence: number | null;
   rationale: string | null;
+  debate_transcript_json: Record<string, unknown> | null;
   execution_results: Record<string, unknown>[];
   execution_rows: number;
   execution_ms: number | null;
@@ -295,6 +296,7 @@ export interface IterationDetail {
   generated_sql: string;
   confidence: number | null;
   rationale: string | null;
+  debate_transcript_json: Record<string, unknown> | null;
   execution_results: Record<string, unknown>[] | null;
   execution_rows: number | null;
   execution_ms: number | null;
@@ -312,6 +314,7 @@ export interface GetRequestResponse {
   generated_sql: string;
   confidence: number | null;
   rationale: string | null;
+  debate_transcript_json: Record<string, unknown> | null;
   execution_results: Record<string, unknown>[] | null;
   execution_rows: number | null;
   execution_ms: number | null;
