@@ -117,6 +117,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     await janitor.start()
     logger.info("sandbox_janitor_started")
 
+    from app.sandbox.manager import sandbox_manager
+    await sandbox_manager.start()
+    logger.info("sandbox_manager_started")
+
     logger.info(
         "app_ready",
         path="/health",
@@ -131,6 +135,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
     await stream_manager.stop_cleanup_task()
     await janitor.stop()
+    from app.sandbox.manager import sandbox_manager
+    await sandbox_manager.stop()
 
     await engine.dispose()
     await redis_client.aclose()
@@ -149,7 +155,22 @@ app = FastAPI(
 # ---------------------------------------------------------------------------
 # Middleware — Order matters: outermost first, innermost last
 # ---------------------------------------------------------------------------
-# 1. CORS (outermost)
+# 1. Maintenance mode (checks before any processing)
+app.add_middleware(MaintenanceMiddleware)
+
+# 2. Structured error handler (catches all downstream exceptions)
+app.add_middleware(StructuredErrorMiddleware)
+
+# 3. Rate limiting (per-user and per-session)
+app.add_middleware(RateLimitMiddleware)
+
+# 4. Metrics collection (latency, counters)
+app.add_middleware(MetricsMiddleware)
+
+# 5. OpenTelemetry tracing (captures all spans)
+app.add_middleware(TracingMiddleware)
+
+# 6. CORS (outermost — wraps all other middlewares to handle errors)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.CORS_ORIGINS,
@@ -158,21 +179,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-# 2. Maintenance mode (checks before any processing)
-app.add_middleware(MaintenanceMiddleware)
-
-# 3. Structured error handler (catches all downstream exceptions)
-app.add_middleware(StructuredErrorMiddleware)
-
-# 4. Rate limiting (per-user and per-session)
-app.add_middleware(RateLimitMiddleware)
-
-# 5. Metrics collection (latency, counters)
-app.add_middleware(MetricsMiddleware)
-
-# 6. OpenTelemetry tracing (innermost — captures all spans)
-app.add_middleware(TracingMiddleware)
 
 # ---------------------------------------------------------------------------
 # OpenTelemetry instrumentation

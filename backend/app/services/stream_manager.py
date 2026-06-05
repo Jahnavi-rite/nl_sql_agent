@@ -120,14 +120,22 @@ class StreamManager:
             self._metrics["reconnect_count"] += 1
         return stream
 
-    def unregister_connection(self, session_id: str, ws: WebSocket) -> None:
+    def unregister_connection(
+        self,
+        session_id: str,
+        ws: WebSocket,
+        duration_ms: float | None = None,
+    ) -> None:
         stream = self.get_stream(session_id)
         if stream:
             stream.unregister_ws(ws)
             self._metrics["active_connections"] = sum(
                 s.ws_count for s in self._sessions.values()
             )
-            self._metrics["stream_duration_total_ms"] += stream.age_seconds * 1000
+            if duration_ms is not None:
+                self._metrics["stream_duration_total_ms"] += duration_ms
+            else:
+                self._metrics["stream_duration_total_ms"] += stream.age_seconds * 1000
             if stream.ws_count == 0 and stream.is_done:
                 self._cleanup_stream(session_id)
 

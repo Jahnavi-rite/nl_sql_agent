@@ -219,6 +219,7 @@ class SandboxPool:
             name=f"replenish-{dialect}",
         )
         self._replenish_tasks.append(task)
+        self._replenish_tasks = [t for t in self._replenish_tasks if not t.done()]
 
         return sandbox
 
@@ -326,6 +327,10 @@ class SandboxManager:
             query_timeout=query_timeout,
         )
         return sandbox
+
+
+# Global sandbox manager instance
+sandbox_manager = SandboxManager(publish_port=True)
 
 
 # ======================================================================

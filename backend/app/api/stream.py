@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-from typing import Any
 
 import structlog
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
@@ -20,6 +19,7 @@ BUFFERED_EVENT_BATCH_SIZE = 20
 async def session_stream(ws: WebSocket, session_id: str) -> None:
     await ws.accept()
     conn_start = asyncio.get_event_loop().time()
+    ws_lock = asyncio.Lock()
 
     logger.info("ws_connected", session_id=session_id)
 
@@ -29,51 +29,58 @@ async def session_stream(ws: WebSocket, session_id: str) -> None:
     buffered = stream.replay_buffer()
     for event in buffered:
         try:
-            await ws.send_text(json.dumps(event))
+            async with ws_lock:
+                await ws.send_text(json.dumps(event))
         except Exception:
             logger.warning("ws_replay_failed", session_id=session_id)
             break
 
-    last_ping = asyncio.get_event_loop().time()
+    # Background task to read from WebSocket (handles client pings and disconnects)
+    async def read_from_client() -> None:
+        try:
+            while True:
+                msg = await ws.receive_text()
+                try:
+                    data = json.loads(msg)
+                    if data.get("type") == "ping":
+                        async with ws_lock:
+                            await ws.send_text(json.dumps({"type": "pong"}))
+                except Exception:
+                    pass
+        except WebSocketDisconnect:
+            raise
+        except Exception:
+            pass
+
+    client_reader = asyncio.create_task(read_from_client())
 
     try:
-        while True:
+        while not client_reader.done():
             # Check if pipeline is done
             if stream.is_done:
                 final_events = stream.replay_buffer()[-5:]
                 for ev in final_events:
                     try:
-                        await ws.send_text(json.dumps(ev))
+                        async with ws_lock:
+                            await ws.send_text(json.dumps(ev))
                     except Exception:
                         break
                 break
 
-            # Send ping if interval elapsed
-            now = asyncio.get_event_loop().time()
-            if now - last_ping >= PING_INTERVAL:
-                try:
-                    await ws.send_text(json.dumps({"type": "ping"}))
-                except Exception:
-                    break
-                last_ping = now
-
-            # Wait for next event or client message with short timeout
+            # Wait for next event from stream queue, but also check if client disconnected
             try:
-                event = await asyncio.wait_for(
-                    _next_event_or_message(stream, ws), timeout=1.0
-                )
+                event = await asyncio.wait_for(stream._queue.get(), timeout=1.0)  # type: ignore[arg-type]
+                if event is None:
+                    break
+                async with ws_lock:
+                    await ws.send_text(json.dumps(event))
             except TimeoutError:
+                # No new event, check client_reader.done() at top of loop
                 continue
 
-            if event is None:
-                break
-
-            # Forward event to client
-            try:
-                await ws.send_text(json.dumps(event))
-            except Exception:
-                logger.warning("ws_send_failed", session_id=session_id)
-                break
+        # If client reader finished with an exception (e.g. WebSocketDisconnect), raise it
+        if client_reader.done():
+            client_reader.result()
 
     except WebSocketDisconnect:
         logger.info(
@@ -85,41 +92,11 @@ async def session_stream(ws: WebSocket, session_id: str) -> None:
     except Exception as exc:
         logger.error("ws_error", session_id=session_id, error=str(exc))
     finally:
-        stream_manager.unregister_connection(session_id, ws)
+        client_reader.cancel()
+        conn_duration_ms = (asyncio.get_event_loop().time() - conn_start) * 1000
+        stream_manager.unregister_connection(session_id, ws, duration_ms=conn_duration_ms)
         logger.info(
             "ws_closed",
             session_id=session_id,
-            duration_ms=round((asyncio.get_event_loop().time() - conn_start) * 1000, 1),
+            duration_ms=round(conn_duration_ms, 1),
         )
-
-
-async def _next_event_or_message(stream: Any, ws: WebSocket) -> Any:
-    """Wait for either a queue event or a client message.
-
-    Returns event dict if from queue, None if stream is done,
-    or continues looping on client messages.
-    """
-    while True:
-        try:
-            event = await asyncio.wait_for(stream._queue.get(), timeout=0.5)
-            if event is None:
-                return None
-            return event
-        except TimeoutError:
-            # Check for client messages during timeout
-            try:
-                msg = await asyncio.wait_for(ws.receive_text(), timeout=0.1)
-                if msg:
-                    try:
-                        data = json.loads(msg)
-                        if data.get("type") == "ping":
-                            await ws.send_text(json.dumps({"type": "pong"}))
-                    except (json.JSONDecodeError, Exception):
-                        pass
-            except TimeoutError:
-                # No client message, check if stream is done and retry queue
-                if stream.is_done:
-                    return None
-                continue
-            except Exception:
-                return None

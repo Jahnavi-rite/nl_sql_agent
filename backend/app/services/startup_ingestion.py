@@ -99,8 +99,8 @@ def ingest_csv_to_postgres(csv_path: str, sync_engine: Any) -> dict[str, Any]:
         logger.info("table_already_exists", table_name=table_name, rows=row_count)
         return {"table_name": table_name, "filename": filename, "row_count": row_count}
 
-    df = pd.read_csv(csv_path)
-    df.columns = [sanitize_name(c) for c in df.columns]
+    df = pd.read_csv(csv_path, nrows=50000)
+    df.columns = sanitize_column_names(list(df.columns))
 
     with sync_engine.begin() as conn:
         df.to_sql(
@@ -125,6 +125,17 @@ def sanitize_name(name: str) -> str:
     if not safe or safe[0].isdigit():
         safe = "c_" + safe
     return safe[:63]
+
+
+def sanitize_column_names(columns: list[Any]) -> list[str]:
+    seen: dict[str, int] = {}
+    result: list[str] = []
+    for raw in columns:
+        base = sanitize_name(str(raw))
+        count = seen.get(base, 0)
+        seen[base] = count + 1
+        result.append(base if count == 0 else f"{base}_{count + 1}")
+    return result
 
 
 def extract_db_schema(sync_engine: Any) -> dict[str, Any]:

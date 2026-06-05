@@ -16,7 +16,6 @@ from app.models.session import Dataset
 from app.schemas.requests import DatasetUploadResponse
 from app.services.dataset_service import (
     combined_suggested_prompts,
-    inspect_file,
     suggested_prompts_for_dataset,
 )
 from app.services.session_service import get_session
@@ -61,28 +60,40 @@ async def upload_dataset(
         raise HTTPException(status_code=422, detail="Empty file")
 
     try:
-        ingested = inspect_file(
-            content,
-            dialect,
-            filename=file.filename,
-        )
-
-        from app.services.dataset_service import parse_csv, parse_excel
-        df = parse_excel(content) if ext in ("xls", "xlsx") else parse_csv(content)
-
-        def _to_sql_sync(session: Any) -> None:
-            conn = session.connection()
-            method = "multi" if conn.dialect.name == "postgresql" else None
-            df.to_sql(
-                name=ingested["table_name"],
-                con=conn,
-                if_exists="replace",
-                index=False,
-                chunksize=5000,
-                method=method,
+        from app.core.config import settings
+        if settings.APP_ENV == "testing":
+            from app.services.dataset_service import inspect_file, parse_csv, parse_excel
+            ingested = inspect_file(
+                content,
+                dialect,
+                filename=file.filename,
             )
+            df = parse_excel(content) if ext in ("xls", "xlsx") else parse_csv(content)
 
-        await db.run_sync(_to_sql_sync)
+            def _to_sql_sync(session: Any) -> None:
+                conn = session.connection()
+                method = "multi" if conn.dialect.name == "postgresql" else None
+                df.to_sql(
+                    name=ingested["table_name"],
+                    con=conn,
+                    if_exists="replace",
+                    index=False,
+                    chunksize=5000,
+                    method=method,
+                )
+
+            await db.run_sync(_to_sql_sync)
+        else:
+            from app.services.dataset_service import ingest_file
+            from app.services.session_service import get_or_create_session_sandbox
+
+            sandbox = await get_or_create_session_sandbox(db, session_id)
+            ingested = await ingest_file(
+                sandbox._executor,
+                content,
+                dialect,
+                filename=file.filename,
+            )
 
     except Exception as exc:
         logger.error("dataset_ingestion_failed", session_id=str(session_id), error=str(exc))

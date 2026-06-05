@@ -26,6 +26,8 @@ from app.models import Base
 TEST_DB_URL = "sqlite+aiosqlite:///:memory:"
 
 engine = create_async_engine(TEST_DB_URL, echo=False)
+import app.core.database
+app.core.database.engine = engine
 async_test_session = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
 

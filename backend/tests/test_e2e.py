@@ -67,10 +67,9 @@ def _assert_valid_response(data: dict, dialect: str, prompt: str) -> None:
     assert data["confidence"] is not None, f"{dialect}: confidence is None"
     assert 0 <= data["confidence"] <= 1, f"{dialect}: confidence out of range: {data['confidence']}"
     assert data["rationale"], f"{dialect}: rationale is empty"
-    assert data["status"] in ("completed", "failed"), f"{dialect}: unexpected status: {data['status']}"
-    if data["status"] == "completed":
-        assert isinstance(data["execution_results"], list), f"{dialect}: execution_results not a list"
-        assert data["execution_ms"] is not None, f"{dialect}: execution_ms is None"
+    assert data["status"] == "completed", f"{dialect}: unexpected status: {data['status']}, error: {data.get('error_message')}"
+    assert isinstance(data["execution_results"], list), f"{dialect}: execution_results not a list"
+    assert data["execution_ms"] is not None, f"{dialect}: execution_ms is None"
 
 
 # ---------------------------------------------------------------------------
@@ -127,7 +126,7 @@ async def test_nl_pipeline_e2e(
     assert get_resp.status_code == 200, f"GET request failed: {get_resp.text}"
     get_data = get_resp.json()
     assert get_data["generated_sql"], "No generated_sql in GET response"
-    assert get_data["status"] in ("executed", "failed"), f"Unexpected persisted status: {get_data['status']}"
+    assert get_data["status"] == "executed", f"Unexpected persisted status: {get_data['status']}, error: {get_data.get('error_message')}"
 
     # 5. List all requests for session
     list_resp = await async_client.get(f"/sessions/{session_id}/requests")

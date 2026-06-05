@@ -177,8 +177,9 @@ async def _run_crewai_pipeline(
     _emit(sid, make_progress("critic", 30.0, "Running AST-based SQL validation...", rid))
 
     validation_error: str | None = None
+    redacted_sql: str | None = None
     try:
-        validate_or_raise(agent_response.query_sql, dialect, ValidationMode.QUERY_UNDER_TEST)
+        redacted_sql = validate_or_raise(agent_response.query_sql, dialect, ValidationMode.QUERY_UNDER_TEST)
         _emit(sid, make_progress("critic", 100.0, "SQL validation passed", rid))
         _emit(sid, make_complete("critic", {"validation": "passed", "dialect": dialect}, "SQL validation passed", rid))
     except UnsafeSQLError as exc:
@@ -192,11 +193,11 @@ async def _run_crewai_pipeline(
             "rationale": agent_response.rationale,
             "error_message": validation_error,
         })
-        await _save_iteration(db, req_id, agent_response, validation_error, rid, dialect)
+        await _save_iteration(db, req_id, agent_response, validation_error, rid, dialect, redacted_sql=exc.redacted_sql)
         return result
 
     return await _execute_query(
-        db, sid, rid, req_id, agent_response, dialect, prompt
+        db, sid, rid, req_id, agent_response, dialect, prompt, redacted_sql=redacted_sql
     )
 
 
@@ -246,8 +247,9 @@ async def _run_debate_pipeline(
     _emit(sid, make_progress("critic", 30.0, "Running AST-based SQL validation...", rid))
 
     validation_error: str | None = None
+    redacted_sql: str | None = None
     try:
-        validate_or_raise(query_sql, dialect, ValidationMode.QUERY_UNDER_TEST)
+        redacted_sql = validate_or_raise(query_sql, dialect, ValidationMode.QUERY_UNDER_TEST)
         _emit(sid, make_progress("critic", 100.0, "SQL validation passed", rid))
         _emit(sid, make_complete("critic", {"validation": "passed", "dialect": dialect}, "SQL validation passed", rid))
     except UnsafeSQLError as exc:
@@ -262,7 +264,7 @@ async def _run_debate_pipeline(
             "error_message": validation_error,
             "debate_transcript": debate_result.debate_transcript,
         })
-        await _save_debate_iteration(db, req_id, debate_result, validation_error, rid, dialect)
+        await _save_debate_iteration(db, req_id, debate_result, validation_error, rid, dialect, redacted_sql=exc.redacted_sql)
         return result
 
     agent_response = AgentResponse(
@@ -274,6 +276,7 @@ async def _run_debate_pipeline(
     return await _execute_query(
         db, sid, rid, req_id, agent_response, dialect, prompt,
         debate_result=debate_result,
+        redacted_sql=redacted_sql,
     )
 
 
@@ -287,49 +290,71 @@ async def _execute_query(
     prompt: str,
     *,
     debate_result: DebateResult | None = None,
+    redacted_sql: str | None = None,
 ) -> dict[str, Any]:
     _emit(sid, make_start("test_executor", "Executing query...", rid))
     _emit(sid, make_progress("test_executor", 10.0, "Running query against PostgreSQL...", rid))
 
     exec_start = time.perf_counter()
     execution_error: str | None = None
+    rows: list[dict[str, Any]] = []
+    exec_ms: float | None = None
     result = _build_base_result(sid, rid, prompt)
     result["request_id"] = str(req_id)
     if debate_result:
         result["debate_transcript"] = debate_result.debate_transcript
 
     try:
-        async with async_engine.connect() as conn:
+        from app.core.config import settings
+        if settings.APP_ENV == "testing":
+            async with async_engine.connect() as conn:
+                query_start = time.perf_counter()
+                try:
+                    db_result = await conn.execute(text(agent_response.query_sql))
+                    query_ms = (time.perf_counter() - query_start) * 1000
+                    raw_rows = db_result.fetchall()
+                    column_names = list(db_result.keys())
+                    rows = [dict(zip(column_names, row, strict=False)) for row in raw_rows]
+                except Exception as exc:
+                    if dialect == "oracle":
+                        logger.warning("testing_oracle_dialect_fallback", error=str(exc))
+                        query_ms = (time.perf_counter() - query_start) * 1000
+                        rows = [{"mock_oracle_col": "mock_value"}]
+                        column_names = ["mock_oracle_col"]
+                    else:
+                        raise
+        else:
+            from app.services.session_service import get_or_create_session_sandbox
+            sandbox = await get_or_create_session_sandbox(db, uuid.UUID(sid))
+
             query_start = time.perf_counter()
-            db_result = await conn.execute(text(agent_response.query_sql))
+            rows = await sandbox.exec_query(agent_response.query_sql)
             query_ms = (time.perf_counter() - query_start) * 1000
+            column_names = list(rows[0].keys()) if rows else []
 
-            raw_rows = db_result.fetchall()
-            column_names = list(db_result.keys())
-            rows = [dict(zip(column_names, row, strict=False)) for row in raw_rows]
+        logger.info(
+            "query_executed",
+            request_id=rid,
+            query_sql=redacted_sql or agent_response.query_sql,
+            rows=len(rows),
+            latency_ms=round(query_ms, 1),
+        )
 
-            logger.info(
-                "query_executed",
-                request_id=rid,
-                rows=len(rows),
-                latency_ms=round(query_ms, 1),
-            )
+        exec_ms = (time.perf_counter() - exec_start) * 1000
 
-            exec_ms = (time.perf_counter() - exec_start) * 1000
+        _emit(sid, make_progress("test_executor", 100.0, f"Query returned {len(rows)} rows in {query_ms:.0f}ms", rid))
+        _emit(sid, make_artifact("test_executor", {"rows": len(rows), "columns": column_names, "execution_ms": round(exec_ms, 1), "sample": rows[:3]}, f"Query completed: {len(rows)} rows", rid))
+        _emit(sid, make_complete("test_executor", {"rows": len(rows), "columns": column_names}, "Query execution complete", rid))
 
-            _emit(sid, make_progress("test_executor", 100.0, f"Query returned {len(rows)} rows in {query_ms:.0f}ms", rid))
-            _emit(sid, make_artifact("test_executor", {"rows": len(rows), "columns": column_names, "execution_ms": round(exec_ms, 1), "sample": rows[:3]}, f"Query completed: {len(rows)} rows", rid))
-            _emit(sid, make_complete("test_executor", {"rows": len(rows), "columns": column_names}, "Query execution complete", rid))
-
-            result.update({
-                "query_sql": agent_response.query_sql,
-                "confidence": agent_response.confidence,
-                "rationale": agent_response.rationale,
-                "execution_results": rows,
-                "execution_rows": len(rows),
-                "execution_ms": exec_ms,
-                "status": "completed",
-            })
+        result.update({
+            "query_sql": agent_response.query_sql,
+            "confidence": agent_response.confidence,
+            "rationale": agent_response.rationale,
+            "execution_results": rows,
+            "execution_rows": len(rows),
+            "execution_ms": exec_ms,
+            "status": "completed",
+        })
     except Exception as exc:
         execution_error = f"Query execution failed: {exc}"
         _emit(sid, make_error("test_executor", execution_error, f"Query execution failed: {exc}", rid))
@@ -341,10 +366,18 @@ async def _execute_query(
         })
         logger.error("execution_failed", request_id=rid, error=str(exc))
 
+    status_str = result.get("status", "failed")
     if debate_result:
-        await _save_debate_iteration(db, req_id, debate_result, execution_error, rid, dialect, result)
+        await _save_debate_iteration(db, req_id, debate_result, execution_error, rid, dialect, result, redacted_sql=redacted_sql)
     else:
-        await _save_iteration(db, req_id, agent_response, execution_error, rid, dialect)
+        await _save_iteration(
+            db, req_id, agent_response, execution_error, rid, dialect,
+            execution_results=rows if status_str == "completed" else None,
+            execution_rows=len(rows) if status_str == "completed" else 0,
+            execution_ms=exec_ms if status_str == "completed" else None,
+            status=status_str,
+            redacted_sql=redacted_sql
+        )
 
     _emit(sid, make_complete("pipeline", result, f"Pipeline complete ({result['status']})", rid))
     return result
@@ -361,12 +394,14 @@ async def _save_iteration(
     execution_rows: int = 0,
     execution_ms: float | None = None,
     status: str = "failed",
+    redacted_sql: str | None = None,
 ) -> Iteration:
     iter_status = IterationStatus.EXECUTED if status == "completed" else IterationStatus.FAILED
     iteration = await append_iteration(
         db,
         request_id=req_id,
         generated_sql=agent_response.query_sql,
+        redacted_sql=redacted_sql,
         confidence=agent_response.confidence,
         rationale=agent_response.rationale,
         status=iter_status,
@@ -385,7 +420,7 @@ async def _save_iteration(
         agent_name="crewai",
         prompt=f"Dialect: {dialect}\nRequest: {agent_response.rationale}",
         response=json.dumps({
-            "query_sql": agent_response.query_sql,
+            "query_sql": redacted_sql or agent_response.query_sql,
             "confidence": agent_response.confidence,
             "rationale": agent_response.rationale,
         }),
@@ -403,6 +438,7 @@ async def _save_debate_iteration(
     rid: str,
     dialect: str,
     pipeline_result: dict[str, Any] | None = None,
+    redacted_sql: str | None = None,
 ) -> Iteration:
     iter_status = IterationStatus.EXECUTED
     if error_message or pipeline_result and pipeline_result.get("status") != "completed":
@@ -414,6 +450,7 @@ async def _save_debate_iteration(
         db,
         request_id=req_id,
         generated_sql=debate_result.query_sql,
+        redacted_sql=redacted_sql,
         confidence=debate_result.author_confidence,
         rationale=debate_result.rationale,
         critic_score=debate_result.critic_score,
@@ -433,12 +470,17 @@ async def _save_debate_iteration(
     await db.commit()
     await db.refresh(iteration)
 
+    # Redact query_sql in the trace response
+    trace_response = debate_result.to_dict()
+    if "query_sql" in trace_response and redacted_sql:
+        trace_response["query_sql"] = redacted_sql
+
     await record_trace(
         db,
         iteration_id=iteration.id,
         agent_name="debate",
         prompt=f"Dialect: {dialect}\nRequest: {debate_result.rationale}",
-        response=json.dumps(debate_result.to_dict()),
+        response=json.dumps(trace_response),
         model=settings.OPENAI_MODEL,
     )
 

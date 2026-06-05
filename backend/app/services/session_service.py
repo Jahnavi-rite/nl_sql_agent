@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, Literal, cast
 
 import structlog
 from sqlalchemy import select
@@ -34,6 +34,9 @@ from app.models.session import (
     Request,
     Session,
 )
+from app.sandbox.container import SandboxContainer
+from app.sandbox.executor import DatabaseExecutor
+from app.sandbox.manager import Sandbox
 
 logger = structlog.get_logger()
 
@@ -117,6 +120,26 @@ async def close_session(
     session.closed_at = datetime.now(timezone.utc)  # noqa: UP017 — Python 3.10 compat
     await db.commit()
     await db.refresh(session)
+    # Retrieve and destroy sandbox container if any exists
+    handle = await get_sandbox(str(session_id))
+    if handle:
+        try:
+            from app.sandbox.executor import create_executor
+
+            dialect = handle.get("dialect", "postgres")
+            container = SandboxContainer(dialect)
+            container.container_id = cast(str, handle.get("container_id"))
+            container.network_id = cast(str, handle.get("network_id"))
+            container.volume_id = cast(str, handle.get("volume_id"))
+            container.host = cast(str, handle.get("host", ""))
+            container.port = cast(int, handle.get("port", 0))
+
+            executor = create_executor(dialect)
+            sandbox = Sandbox(dialect, container, executor)
+            await sandbox.destroy()
+        except Exception as exc:
+            logger.warning("failed_to_destroy_sandbox_on_close", session_id=str(session_id), error=str(exc))
+
     await clear_session_context(str(session_id))
     await clear_sandbox_handle(str(session_id))
     logger.info("session_closed", session_id=str(session_id))
@@ -439,3 +462,134 @@ async def clear_state(session_id: str) -> None:
     """Clear all Redis state for a session."""
     await clear_session_context(session_id)
     await clear_sandbox_handle(session_id)
+
+
+# ---------------------------------------------------------------------------
+# Test Environment Sandbox Fallbacks
+# ---------------------------------------------------------------------------
+
+class DummyContainer(SandboxContainer):
+    def __init__(self, dialect: str = "postgres") -> None:
+        self.dialect = dialect
+        self.container_id = None
+        self.network_id = None
+        self.volume_id = None
+        self.host = "127.0.0.1"
+        self.port = 0
+
+    def is_running(self) -> bool:
+        return True
+
+    def stop(self) -> None:
+        pass
+
+
+
+class TestDatabaseExecutor(DatabaseExecutor):
+    def __init__(self, bind_engine: Any) -> None:
+        self._engine = bind_engine
+
+    async def connect(self, host: str, port: int, **kwargs: Any) -> None:
+        pass
+
+    async def execute(self, sql: str, timeout: int = 30) -> list[dict[str, Any]]:
+        from sqlalchemy import text
+        async with self._engine.connect() as conn:
+            res = await conn.execute(text(sql))
+            if res.returns_rows:
+                raw_rows = res.fetchall()
+                column_names = list(res.keys())
+                return [dict(zip(column_names, row, strict=False)) for row in raw_rows]
+            return []
+
+    async def execute_ddl(self, sql: str, timeout: int = 30) -> None:
+        from sqlalchemy import text
+        async with self._engine.begin() as conn:
+            await conn.execute(text(sql))
+
+    async def explain(self, sql: str, timeout: int = 30) -> list[dict[str, Any]]:
+        from sqlalchemy import text
+        async with self._engine.connect() as conn:
+            res = await conn.execute(text(f"EXPLAIN QUERY PLAN {sql}"))
+            raw_rows = res.fetchall()
+            column_names = list(res.keys())
+            return [dict(zip(column_names, row, strict=False)) for row in raw_rows]
+
+    async def health(self) -> bool:
+        return True
+
+    async def close(self) -> None:
+        pass
+
+
+async def get_or_create_session_sandbox(
+    db: AsyncSession,
+    session_id: uuid.UUID,
+) -> Sandbox:
+    """Retrieve or create the Sandbox container for the session."""
+    from app.core.config import settings
+
+    session = await get_session(db, session_id)
+    if session is None:
+        raise ValueError(f"Session {session_id} not found.")
+
+    dialect_raw = session.dialect.value if hasattr(session.dialect, "value") else str(session.dialect)
+    dialect_mapped = cast(Literal["postgres", "oracle"], "postgres" if dialect_raw == "postgresql" else dialect_raw)
+
+    # Fallback for testing when Docker daemon is not running
+    if settings.APP_ENV == "testing":
+        docker_available = False
+        try:
+            import docker
+            docker.from_env().ping()
+            docker_available = True
+        except Exception:
+            pass
+
+        if not docker_available:
+            logger.info("using_test_sqlite_fallback_sandbox", session_id=str(session_id))
+            container: SandboxContainer = DummyContainer()
+            executor: DatabaseExecutor = TestDatabaseExecutor(db.bind)
+            return Sandbox(dialect_mapped, container, executor)
+
+    # 1. Check if a sandbox handle is stored in Redis
+    handle = await get_sandbox(str(session_id))
+    if handle:
+        try:
+            from app.sandbox.executor import create_executor
+
+            container = SandboxContainer(dialect_mapped)
+            container.container_id = cast(str, handle.get("container_id"))
+            container.network_id = cast(str, handle.get("network_id"))
+            container.volume_id = cast(str, handle.get("volume_id"))
+            container.host = cast(str, handle.get("host", ""))
+            container.port = cast(int, handle.get("port", 0))
+
+            if container.is_running():
+                executor = create_executor(dialect_mapped)
+                await executor.connect(container.host, container.port)
+                if await executor.health():
+                    logger.info("reusing_session_sandbox", session_id=str(session_id), dialect=dialect_mapped)
+                    return Sandbox(dialect_mapped, container, executor)
+                else:
+                    await executor.close()
+        except Exception as exc:
+            logger.warning("failed_to_reconstruct_sandbox", session_id=str(session_id), error=str(exc))
+
+    # 2. Create a fresh sandbox if none was found or reconstructed
+    from app.sandbox.manager import sandbox_manager
+    logger.info("creating_fresh_session_sandbox", session_id=str(session_id), dialect=dialect_mapped)
+    sandbox = await sandbox_manager.create(dialect_mapped)
+
+    # 3. Save the handle back to Redis
+    handle_data = {
+        "dialect": dialect_mapped,
+        "container_id": sandbox._container.container_id,
+        "network_id": sandbox._container.network_id,
+        "volume_id": sandbox._container.volume_id,
+        "host": sandbox._container.host,
+        "port": sandbox._container.port,
+    }
+    await set_sandbox(str(session_id), handle_data)
+
+    return sandbox

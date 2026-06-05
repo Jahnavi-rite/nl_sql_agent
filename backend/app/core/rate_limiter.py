@@ -74,6 +74,24 @@ class RateLimitMiddleware:
             await response(scope, receive, send)
             return
 
+        # Check session rate limit if path contains session_id
+        parts = path.strip("/").split("/")
+        if len(parts) >= 2 and parts[0] == "sessions":
+            session_id = parts[1]
+            if not _session_counter.allow(session_id):
+                RATE_LIMIT_BLOCKS.labels(limit_type="session").inc()
+                logger.warning("session_rate_limit_blocked", session_id=session_id)
+                response = JSONResponse(
+                    status_code=429,
+                    content={
+                        "error_code": "RATE_LIMITED",
+                        "message": "Too many requests for this session. Please slow down.",
+                        "retry_after_seconds": 60,
+                    },
+                )
+                await response(scope, receive, send)
+                return
+
         await self.app(scope, receive, send)
 
     async def _handle_ws(self, scope: Any, receive: Any, send: Any) -> None:
