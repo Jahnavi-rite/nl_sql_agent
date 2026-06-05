@@ -25,6 +25,7 @@ if sys.platform == "win32":
 import structlog
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from starlette.responses import JSONResponse as _JSONResponse
 
 from app.api.datasets import router as datasets_router
 from app.api.feedback import router as feedback_router
@@ -199,7 +200,6 @@ async def metrics():
 # ---------------------------------------------------------------------------
 # Structured 404/405 error handlers
 # ---------------------------------------------------------------------------
-from starlette.responses import JSONResponse as _JSONResponse
 
 @app.exception_handler(404)
 async def not_found_handler(request, exc):

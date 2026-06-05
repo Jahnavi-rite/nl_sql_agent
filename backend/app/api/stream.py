@@ -61,7 +61,7 @@ async def session_stream(ws: WebSocket, session_id: str):
                 event = await asyncio.wait_for(
                     _next_event_or_message(stream, ws), timeout=1.0
                 )
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 continue
 
             if event is None:
@@ -94,7 +94,7 @@ async def session_stream(ws: WebSocket, session_id: str):
 
 async def _next_event_or_message(stream, ws):
     """Wait for either a queue event or a client message.
-    
+
     Returns event dict if from queue, None if stream is done,
     or continues looping on client messages.
     """
@@ -104,7 +104,7 @@ async def _next_event_or_message(stream, ws):
             if event is None:
                 return None
             return event
-        except asyncio.TimeoutError:
+        except TimeoutError:
             # Check for client messages during timeout
             try:
                 msg = await asyncio.wait_for(ws.receive_text(), timeout=0.1)
@@ -115,7 +115,7 @@ async def _next_event_or_message(stream, ws):
                             await ws.send_text(json.dumps({"type": "pong"}))
                     except (json.JSONDecodeError, Exception):
                         pass
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 # No client message, check if stream is done and retry queue
                 if stream.is_done:
                     return None

@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import time
 from collections import deque
+from contextlib import suppress
 from typing import Any
 
 import structlog
@@ -160,10 +161,8 @@ class StreamManager:
     async def stop_cleanup_task(self) -> None:
         if self._cleanup_task and not self._cleanup_task.done():
             self._cleanup_task.cancel()
-            try:
+            with suppress(asyncio.CancelledError):
                 await self._cleanup_task
-            except asyncio.CancelledError:
-                pass
 
 
 stream_manager = StreamManager()

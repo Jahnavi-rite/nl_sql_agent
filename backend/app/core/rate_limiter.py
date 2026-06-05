@@ -2,16 +2,13 @@ from __future__ import annotations
 
 import time
 from collections import defaultdict
-from collections.abc import Awaitable, Callable
 
 import structlog
-from starlette.middleware.base import RequestResponseEndpoint
-from starlette.requests import Request
 from starlette.responses import JSONResponse
 from starlette.types import ASGIApp
 
 from app.core.config import settings
-from app.core.metrics import RATE_LIMIT_BLOCKS, ACTIVE_WS_CONNECTIONS
+from app.core.metrics import ACTIVE_WS_CONNECTIONS, RATE_LIMIT_BLOCKS
 
 logger = structlog.get_logger()
 

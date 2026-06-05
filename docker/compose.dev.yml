@@ -115,6 +115,8 @@ services:
     volumes:
       - ../backend/app:/app/app
       - /var/run/docker.sock:/var/run/docker.sock
+      - ../jde_tables.csv:/app/jde_tables.csv
+      - ../consolidated_FBDI.csv:/app/consolidated_FBDI.csv
     depends_on:
       postgres:
         condition: service_healthy

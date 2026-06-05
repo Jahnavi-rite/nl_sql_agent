@@ -5,6 +5,7 @@ import re
 from collections.abc import Callable
 from typing import Any
 
+from app.agents.single_shot import DOMAIN_CONTEXT, SQL_RULES
 from app.core.config import settings
 
 
@@ -118,7 +119,8 @@ def create_nl_sql_crew(
         backstory=(
             "You are an expert at understanding what users really want from their descriptions. "
             "You break down requests into clear, actionable components and identify which database "
-            "tables and columns are relevant to answer the query. You always output a structured analysis."
+            "tables and columns are relevant to answer the query. You always output a structured analysis.\n\n"
+            f"Domain Knowledge for JDE → Oracle Fusion migrations:\n{DOMAIN_CONTEXT}"
         ),
         allow_delegation=False,
         verbose=False,
@@ -132,7 +134,9 @@ def create_nl_sql_crew(
             "You are a senior SQL developer who writes perfect dialect-specific SQL. "
             "You produce only SELECT statements and follow all safety rules. "
             "Your queries use proper JOINs, WHERE clauses, GROUP BY, and ORDER BY as needed. "
-            "You output the SQL inside a markdown code block."
+            "You output the SQL inside a markdown code block.\n\n"
+            f"Follow these rules:\n{SQL_RULES}\n\n"
+            f"Domain Knowledge:\n{DOMAIN_CONTEXT}"
         ),
         allow_delegation=False,
         verbose=False,
@@ -160,6 +164,8 @@ def create_nl_sql_crew(
             "**SQL Dialect:** {dialect}\n"
             "**Available Database Schema:**\n"
             "```\n{schema}\n```\n\n"
+            "Use your domain knowledge about JDE to Oracle Fusion extraction patterns "
+            "to understand supplier, customer, and AR invoice migration requests.\n\n"
             "Identify:\n"
             "1. What the user wants to retrieve or know\n"
             "2. Which tables and columns are relevant (only from the schema above)\n"
@@ -183,13 +189,7 @@ def create_nl_sql_crew(
             "```\n{schema}\n```\n\n"
             "**Important:** The previous agent's output above contains the intent analysis. "
             "Use it to guide your SQL generation.\n\n"
-            "Rules:\n"
-            "1. Generate ONLY a SELECT query (no INSERT, UPDATE, DELETE, DROP, CREATE, ALTER, etc.)\n"
-            "2. Use ONLY tables and columns from the schema above\n"
-            "3. No dangerous functions (pg_sleep, utl_file, etc.) or system tables\n"
-            "4. No multi-statement SQL\n"
-            "5. The SQL must be valid for {dialect} dialect\n"
-            "6. Include WHERE, GROUP BY, ORDER BY, LIMIT as needed\n\n"
+            f"{SQL_RULES}\n\n"
             "Output ONLY the SQL query inside a markdown SQL code block:"
         ),
         expected_output="A single SQL SELECT query inside a ```sql ``` code block",
@@ -233,7 +233,20 @@ def extract_sql(output: str) -> str:
     pattern = r"```(?:sql)?\s*\n?([\s\S]*?)```"
     matches = re.findall(pattern, output)
     if matches:
-        return matches[-1].strip()
+        sql = matches[-1].strip()
+        try:
+            parsed = json.loads(sql)
+            if "query_sql" in parsed:
+                return parsed["query_sql"]
+        except json.JSONDecodeError:
+            pass
+        return sql
+    try:
+        parsed = json.loads(output)
+        if "query_sql" in parsed:
+            return parsed["query_sql"]
+    except json.JSONDecodeError:
+        pass
     return output.strip()
 
 

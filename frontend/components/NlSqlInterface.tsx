@@ -24,7 +24,7 @@ interface SchemaInfo {
   columns: number;
 }
 
-interface DebateTranscriptUI {
+export interface DebateTranscriptUI {
   turns: Array<{
     round_number: number;
     speaker: string;
@@ -609,7 +609,7 @@ function DebateSection({ result, latestIteration }: { result: CreateNLResponse; 
         <span className="text-xs text-indigo-400">{expanded ? "Hide" : "Show"}</span>
       </button>
       {expanded ? (
-        <DebateView transcript={transcript as DebateTranscriptUI} />
+        <DebateView transcript={transcript as unknown as DebateTranscriptUI} />
       ) : null}
     </div>
   );

@@ -10,9 +10,16 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agents.crew_setup import create_nl_sql_crew, extract_sql_from_tasks
-from app.agents.debate.debate_runner import run_debate
-from app.agents.debate.models import DebateResult
 from app.agents.single_shot import AgentResponse
+
+try:
+    from app.agents.debate.debate_runner import run_debate
+    from app.agents.debate.models import DebateResult
+    DEBATE_AVAILABLE = True
+except (ImportError, RuntimeError):
+    DEBATE_AVAILABLE = False
+    run_debate = None  # type: ignore[assignment]
+    DebateResult = None  # type: ignore[assignment,misc]
 from app.core.config import settings
 from app.core.database import engine as async_engine
 from app.models.enums import IterationStatus
@@ -87,7 +94,7 @@ async def execute_nl_pipeline(
     _emit(sid, make_start("pipeline", "Starting pipeline...", rid))
 
     try:
-        if settings.ENABLE_DEBATE:
+        if settings.ENABLE_DEBATE and DEBATE_AVAILABLE:
             result = await _run_debate_pipeline(
                 db, sid, rid, req_id, prompt, dialect_str, schema_description
             )

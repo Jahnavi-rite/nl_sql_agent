@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import time
+from contextlib import suppress
 
 import docker
 import structlog
@@ -11,10 +12,10 @@ from app.core.metrics import JANITOR_CLEANUPS
 
 logger = structlog.get_logger()
 
-_SANDBOX_LABEL_PREFIX = "com.nlsql.sandbox"
-_SANDBOX_SESSION_LABEL = f"{_SANDBOX_LABEL_PREFIX}.session_id"
-_SANDBOX_DIALECT_LABEL = f"{_SANDBOX_LABEL_PREFIX}.dialect"
-_SANDBOX_CREATED_LABEL = f"{_SANDBOX_LABEL_PREFIX}.created_at"
+_SANDBOX_LABEL_PREFIX = "nlsql-sandbox"
+_SANDBOX_SESSION_LABEL = "session_id"
+_SANDBOX_DIALECT_LABEL = "dialect"
+_SANDBOX_CREATED_LABEL = "created_at"
 
 
 class SandboxJanitor:
@@ -38,10 +39,8 @@ class SandboxJanitor:
     async def stop(self) -> None:
         if self._task and not self._task.done():
             self._task.cancel()
-            try:
+            with suppress(asyncio.CancelledError):
                 await self._task
-            except asyncio.CancelledError:
-                pass
         self._docker_client = None
         logger.info("janitor_stopped")
 
@@ -103,11 +102,8 @@ class SandboxJanitor:
         )
 
     def _destroy_container(self, container) -> None:
-        try:
+        with suppress(Exception):
             container.stop(timeout=5)
             container.remove(force=True, v=True)
-        except Exception:
-            try:
-                container.remove(force=True, v=True)
-            except Exception:
-                pass
+        with suppress(Exception):
+            container.remove(force=True, v=True)

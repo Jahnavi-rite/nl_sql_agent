@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import time
 from typing import Any
 
 import structlog
@@ -93,7 +92,7 @@ def trace_llm_call(
             output=response or error or "",
             usage={
                 "input": token_input or len((system_prompt or "") + prompt),
-                "output": token_output or len((response or error or "")),
+                "output": token_output or len(response or error or ""),
                 "unit": "CHARACTERS",
             },
             level="ERROR" if error else "DEFAULT",

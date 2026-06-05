@@ -1,11 +1,8 @@
 from __future__ import annotations
 
-import traceback as tb
 import uuid
 
 import structlog
-from starlette.middleware.base import RequestResponseEndpoint
-from starlette.requests import Request
 from starlette.responses import JSONResponse
 from starlette.types import ASGIApp
 

@@ -7,7 +7,12 @@ from abc import ABC, abstractmethod
 from collections.abc import Sequence
 from typing import Any
 
-from autogen import AssistantAgent
+try:
+    from autogen import AssistantAgent
+    AUTOGEN_AVAILABLE = True
+except ImportError:
+    AssistantAgent = None
+    AUTOGEN_AVAILABLE = False
 
 from app.core.config import settings
 
@@ -40,6 +45,8 @@ def _build_llm_config() -> dict[str, Any]:
 class DebateAuthor(DebateParticipant):
     def __init__(self) -> None:
         self.name = "DebateAuthor"
+        if AssistantAgent is None:
+            raise RuntimeError("pyautogen is not available; debate feature requires Python <3.13 or pyautogen>=0.10.0 with updated API")
         self.agent = AssistantAgent(
             name=self.name,
             system_message=self._system_prompt(),
@@ -122,6 +129,8 @@ class DebateAuthor(DebateParticipant):
 class DebateCritic(DebateParticipant):
     def __init__(self) -> None:
         self.name = "DebateCritic"
+        if AssistantAgent is None:
+            raise RuntimeError("pyautogen is not available; debate feature requires Python <3.13 or pyautogen>=0.10.0 with updated API")
         self.agent = AssistantAgent(
             name=self.name,
             system_message=self._system_prompt(),

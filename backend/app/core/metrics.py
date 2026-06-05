@@ -4,8 +4,6 @@ import time
 
 import structlog
 from prometheus_client import Counter, Gauge, Histogram, generate_latest
-from starlette.middleware.base import RequestResponseEndpoint
-from starlette.requests import Request
 from starlette.responses import Response
 from starlette.types import ASGIApp
 
@@ -172,5 +170,5 @@ class MetricsMiddleware:
 
 
 def metrics_response() -> Response:
-    from prometheus_client import generate_latest, CONTENT_TYPE_LATEST
+    from prometheus_client import CONTENT_TYPE_LATEST
     return Response(content=generate_latest(), media_type=CONTENT_TYPE_LATEST)

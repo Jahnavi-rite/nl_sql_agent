@@ -1,6 +1,6 @@
 "use client";
 
-import type { DebateTranscriptUI } from "@/components/DebateView";
+import type { DebateTranscriptUI } from "@/components/NlSqlInterface";
 
 export default function DebateView({ transcript }: { transcript: DebateTranscriptUI }) {
   return (
@@ -10,7 +10,7 @@ export default function DebateView({ transcript }: { transcript: DebateTranscrip
         <div className="grid grid-cols-2 gap-2 text-xs text-gray-300 md:grid-cols-4">
           <div>
             <span className="text-gray-500">Rounds</span>
-            <div className="font-mono">{transcript.rounds?.length ?? transcript.summary.total_rounds ?? "-"}</div>
+            <div className="font-mono">{transcript.rounds?.length ?? String(transcript.summary.total_rounds ?? "-")}</div>
           </div>
           <div>
             <span className="text-gray-500">Termination</span>
@@ -27,7 +27,7 @@ export default function DebateView({ transcript }: { transcript: DebateTranscrip
         </div>
       )}
       <div className="space-y-2">
-        {(transcript.turns ?? []).map((turn, idx) => (
+        {(transcript.turns ?? []).map((turn: { round_number: number; speaker: string; timestamp: number; sql_candidate: string; query_hash: string; scores: Record<string, number>; objections: string[]; rationale: string; confidence: number | null; approved: boolean | null; token_usage: Record<string, number>; latency_ms: number; content: string }, idx: number) => (
           <div key={idx} className={`rounded border p-3 ${turn.speaker === "DebateAuthor" ? "border-indigo-700 bg-indigo-950/30" : "border-rose-700 bg-rose-950/30"}`}>
             <div className="flex flex-wrap items-center gap-2">
               <span className="text-xs font-semibold text-gray-200">
@@ -58,7 +58,7 @@ export default function DebateView({ transcript }: { transcript: DebateTranscrip
             )}
             {turn.objections.length > 0 && (
               <ul className="mt-2 list-disc space-y-1 pl-4 text-xs text-rose-200">
-                {turn.objections.map((o, i) => (
+                {turn.objections.map((o: string, i: number) => (
                   <li key={i}>{o}</li>
                 ))}
               </ul>
