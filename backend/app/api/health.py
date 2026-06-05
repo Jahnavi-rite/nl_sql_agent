@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Any
+
 import httpx
 import sqlalchemy
 import structlog
@@ -13,13 +15,13 @@ logger = structlog.get_logger()
 router = APIRouter(tags=["health"])
 
 
-HEALTH_CACHE: dict[str, dict] = {}
+HEALTH_CACHE: dict[str, Any] = {}
 _HEALTH_CACHE_TTL = 10.0
 _last_health_check = 0.0
 
 
 @router.get("/health")
-async def health_check():
+async def health_check() -> dict[str, Any]:
     global _last_health_check
     import time
     now = time.time()
@@ -27,7 +29,7 @@ async def health_check():
     if now - _last_health_check < _HEALTH_CACHE_TTL and HEALTH_CACHE:
         return HEALTH_CACHE
 
-    checks = {}
+    checks: dict[str, Any] = {}
 
     checks["status"] = "ok"
     checks["version"] = settings.APP_VERSION
@@ -51,7 +53,7 @@ async def health_check():
     return checks
 
 
-async def _check_postgres() -> dict:
+async def _check_postgres() -> dict[str, Any]:
     try:
         async with engine.connect() as conn:
             result = await conn.execute(sqlalchemy.text("SELECT 1"))
@@ -62,7 +64,7 @@ async def _check_postgres() -> dict:
         return {"status": "error", "detail": str(exc)}
 
 
-async def _check_redis() -> dict:
+async def _check_redis() -> dict[str, Any]:
     try:
         await redis_client.ping()
         return {"status": "ok"}
@@ -71,7 +73,7 @@ async def _check_redis() -> dict:
         return {"status": "error", "detail": str(exc)}
 
 
-async def _check_docker() -> dict:
+async def _check_docker() -> dict[str, Any]:
     try:
         import docker
         client = docker.from_env()
@@ -81,7 +83,7 @@ async def _check_docker() -> dict:
         return {"status": "error", "detail": str(exc)}
 
 
-async def _check_llm() -> dict:
+async def _check_llm() -> dict[str, Any]:
     try:
         base_url = settings.OPENAI_API_BASE.rstrip("/")
         async with httpx.AsyncClient(timeout=5.0) as client:

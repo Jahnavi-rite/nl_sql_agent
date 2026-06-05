@@ -60,6 +60,7 @@ class SessionStream:
 
 class StreamManager:
     _instance: StreamManager | None = None
+    _initialized: bool = False
 
     def __new__(cls) -> StreamManager:
         if cls._instance is None:

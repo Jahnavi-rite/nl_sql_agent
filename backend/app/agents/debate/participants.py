@@ -1,11 +1,12 @@
 from __future__ import annotations
 
-import logging
 import time
 import uuid
 from abc import ABC, abstractmethod
 from collections.abc import Sequence
 from typing import Any
+
+import structlog
 
 try:
     from autogen import AssistantAgent
@@ -16,7 +17,7 @@ except ImportError:
 
 from app.core.config import settings
 
-logger = logging.getLogger(__name__)
+logger = structlog.get_logger()
 
 
 class DebateParticipant(ABC):
@@ -240,16 +241,22 @@ def _extract_author_json(raw: str) -> dict[str, Any]:
         stripped = "\n".join(content_lines).strip()
 
     try:
-        return json.loads(stripped)
+        val = json.loads(stripped)
+        if isinstance(val, dict):
+            return val
     except json.JSONDecodeError:
-        start = stripped.find("{")
-        end = stripped.rfind("}")
-        if start != -1 and end != -1 and end > start:
-            try:
-                return json.loads(stripped[start : end + 1])
-            except json.JSONDecodeError:
-                pass
-        return {"query_sql": "", "rationale": "", "confidence": 0.0, "description": ""}
+        pass
+
+    start = stripped.find("{")
+    end = stripped.rfind("}")
+    if start != -1 and end != -1 and end > start:
+        try:
+            val2 = json.loads(stripped[start : end + 1])
+            if isinstance(val2, dict):
+                return val2
+        except json.JSONDecodeError:
+            pass
+    return {"query_sql": "", "rationale": "", "confidence": 0.0, "description": ""}
 
 
 def _extract_critic_json(raw: str) -> dict[str, Any]:
@@ -270,18 +277,22 @@ def _extract_critic_json(raw: str) -> dict[str, Any]:
 
     try:
         result = json.loads(stripped)
-        if "scores" in result and not isinstance(result["scores"], dict):
-            result["scores"] = {}
-        return result
+        if isinstance(result, dict):
+            if "scores" in result and not isinstance(result["scores"], dict):
+                result["scores"] = {}
+            return result
     except json.JSONDecodeError:
-        start = stripped.find("{")
-        end = stripped.rfind("}")
-        if start != -1 and end != -1 and end > start:
-            try:
-                result = json.loads(stripped[start : end + 1])
-                if "scores" in result and not isinstance(result["scores"], dict):
-                    result["scores"] = {}
-                return result
-            except json.JSONDecodeError:
-                pass
-        return {"approved": False, "objections": ["Parse error"], "scores": {}, "rationale": "", "confidence": 0.0, "suggestions": ""}
+        pass
+
+    start = stripped.find("{")
+    end = stripped.rfind("}")
+    if start != -1 and end != -1 and end > start:
+        try:
+            result2 = json.loads(stripped[start : end + 1])
+            if isinstance(result2, dict):
+                if "scores" in result2 and not isinstance(result2["scores"], dict):
+                    result2["scores"] = {}
+                return result2
+        except json.JSONDecodeError:
+            pass
+    return {"approved": False, "objections": ["Parse error"], "scores": {}, "rationale": "", "confidence": 0.0, "suggestions": ""}

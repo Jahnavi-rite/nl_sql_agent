@@ -13,6 +13,19 @@ from httpx import ASGITransport, AsyncClient
 from app.main import app
 
 
+from unittest.mock import patch
+
+@pytest.fixture(autouse=True)
+def mock_health_checks():
+    with (
+        patch("app.api.health._check_postgres", return_value={"status": "ok"}),
+        patch("app.api.health._check_redis", return_value={"status": "ok"}),
+        patch("app.api.health._check_docker", return_value={"status": "ok"}),
+        patch("app.api.health._check_llm", return_value={"status": "ok"}),
+    ):
+        yield
+
+
 @pytest.fixture
 async def client() -> AsyncClient:
     """Create a test HTTP client that talks directly to the FastAPI app."""

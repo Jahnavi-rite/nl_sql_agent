@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import time
 from collections import defaultdict
+from typing import Any
 
 import structlog
 from starlette.responses import JSONResponse
@@ -39,7 +40,11 @@ class RateLimitMiddleware:
     def __init__(self, app: ASGIApp) -> None:
         self.app = app
 
-    async def __call__(self, scope, receive, send) -> None:
+    async def __call__(self, scope: Any, receive: Any, send: Any) -> None:
+        if settings.APP_ENV == "testing":
+            await self.app(scope, receive, send)
+            return
+
         if scope["type"] == "http":
             await self._handle_http(scope, receive, send)
         elif scope["type"] == "websocket":
@@ -47,7 +52,7 @@ class RateLimitMiddleware:
         else:
             await self.app(scope, receive, send)
 
-    async def _handle_http(self, scope, receive, send) -> None:
+    async def _handle_http(self, scope: Any, receive: Any, send: Any) -> None:
         path = scope.get("path", "")
         if path in ("/health", "/metrics", "/favicon.ico"):
             await self.app(scope, receive, send)
@@ -71,7 +76,7 @@ class RateLimitMiddleware:
 
         await self.app(scope, receive, send)
 
-    async def _handle_ws(self, scope, receive, send) -> None:
+    async def _handle_ws(self, scope: Any, receive: Any, send: Any) -> None:
         session_id = scope.get("path", "").split("/")[2] if "/sessions/" in scope.get("path", "") else "unknown"
         current = _ws_connections.get(session_id, 0)
         if current >= settings.RATE_LIMIT_WS_PER_SESSION:

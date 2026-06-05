@@ -3,7 +3,7 @@ from __future__ import annotations
 import time
 from typing import Any
 
-from app.agents.debate.models import DebateResult
+from app.agents.debate.models import DebateResult, TerminationReason
 from app.agents.debate.participants import DebateAuthor, DebateCritic
 from app.agents.debate.termination import (
     compute_sql_hash,
@@ -54,7 +54,7 @@ async def run_debate(
         critic_score = 0.0
         final_query_sql = ""
         final_rationale = ""
-        final_status = "continue"
+        final_status: TerminationReason = "max_rounds"
 
         debate_history: list[dict[str, Any]] = []
         previous_hashes: set[str] = set()
@@ -212,6 +212,7 @@ async def run_debate(
                 previous_hashes.add(query_hash)
 
             if done:
+                assert termination_reason != "continue"
                 final_status = termination_reason
                 if emit_event:
                     from app.services.stream_events import make_artifact
@@ -332,7 +333,7 @@ def _extract_sql(author_result: dict[str, Any]) -> str:
         try:
             candidate = json.loads(raw)
             if isinstance(candidate, dict) and "query_sql" in candidate:
-                return candidate["query_sql"]
+                return str(candidate["query_sql"])
             if isinstance(candidate, str):
                 return candidate
         except json.JSONDecodeError:

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, cast
 
 import structlog
 from langfuse import Langfuse
@@ -108,7 +108,7 @@ def trace_llm_call(
 
         generation.end()
         lf.flush()
-        return trace.id
+        return cast(str, trace.id)
 
     except Exception as exc:
         logger.warning("langfuse_trace_failed", error=str(exc))
@@ -153,7 +153,7 @@ def trace_agent_phase(
 
         span.end()
         lf.flush()
-        return trace.id
+        return cast(str, trace.id)
 
     except Exception as exc:
         logger.warning("langfuse_span_failed", agent=agent, error=str(exc))

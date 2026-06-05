@@ -152,7 +152,7 @@ class SandboxPool:
         }
         # Each dialect has an asyncio.Queue of pre-warmed Sandbox instances
         self._queues: dict[Dialect, asyncio.Queue[Sandbox]] = {}
-        self._replenish_tasks: list[asyncio.Task] = []
+        self._replenish_tasks: list[asyncio.Task[Any]] = []
         self._started = False
 
     # ------------------------------------------------------------------

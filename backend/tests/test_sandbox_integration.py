@@ -21,7 +21,17 @@ from docker.errors import NotFound
 
 from app.sandbox.manager import Sandbox, SandboxManager
 
-pytestmark = pytest.mark.integration
+docker_available = False
+try:
+    docker.from_env().ping()
+    docker_available = True
+except Exception:
+    pass
+
+pytestmark = [
+    pytest.mark.integration,
+    pytest.mark.skipif(not docker_available, reason="Docker daemon is not running"),
+]
 
 SANDBOX_LABEL = {"label": "nlsql-sandbox=true"}
 

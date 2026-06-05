@@ -18,6 +18,7 @@ import asyncio
 import sys
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from typing import Any
 
 if sys.platform == "win32":
     asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
@@ -194,7 +195,7 @@ app.include_router(requests_router)
 # Prometheus /metrics — must be after middleware but registered directly
 # ---------------------------------------------------------------------------
 @app.get("/metrics", include_in_schema=False)
-async def metrics():
+async def metrics() -> Any:
     return metrics_response()
 
 # ---------------------------------------------------------------------------
@@ -202,7 +203,7 @@ async def metrics():
 # ---------------------------------------------------------------------------
 
 @app.exception_handler(404)
-async def not_found_handler(request, exc):
+async def not_found_handler(request: Any, exc: Any) -> Any:
     return _JSONResponse(
         status_code=404,
         content={
@@ -213,7 +214,7 @@ async def not_found_handler(request, exc):
     )
 
 @app.exception_handler(405)
-async def method_not_allowed_handler(request, exc):
+async def method_not_allowed_handler(request: Any, exc: Any) -> Any:
     return _JSONResponse(
         status_code=405,
         content={

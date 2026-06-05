@@ -10,6 +10,7 @@ from typing import Any
 import pandas as pd
 import structlog
 from sqlalchemy import create_engine, inspect, text
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 
@@ -22,6 +23,8 @@ def find_csv_files(workspace_root: str | None = None) -> list[str]:
     """Recursively find all .csv files in the workspace and known sub-directories."""
     if workspace_root is None:
         root: Path = Path(__file__).resolve().parent.parent.parent.parent
+        if str(root) == "/" and Path("/app").is_dir():
+            root = Path("/app")
     else:
         root = Path(workspace_root)
 
@@ -237,3 +240,56 @@ def get_cached_schema() -> dict[str, Any]:
 def get_schema_description() -> str:
     desc = SCHEMA_CACHE.get("description")
     return desc if isinstance(desc, str) else ""
+
+
+async def update_schema_cache(db: AsyncSession) -> None:
+    """Dynamically query the database schema and update the cached SCHEMA_CACHE."""
+    def _sync_extract(session: Any) -> dict[str, Any]:
+        from sqlalchemy import inspect
+        connection = session.connection()
+        inspector = inspect(connection)
+
+        # SQLite doesn't use the schema="public" prefix, PostgreSQL does.
+        schema_name = "public" if connection.dialect.name == "postgresql" else None
+        all_tables: list[str] = inspector.get_table_names(schema=schema_name)
+
+        skip_tables = {
+            "alembic_version",
+            "sessions",
+            "requests",
+            "iterations",
+            "feedbacks",
+            "datasets",
+            "agent_traces",
+        }
+        user_tables = [t for t in all_tables if t not in skip_tables]
+
+        tables_meta: list[dict[str, Any]] = []
+        for table_name in user_tables:
+            columns = inspector.get_columns(table_name, schema=schema_name)
+            col_meta = [
+                {
+                    "name": col["name"],
+                    "dtype": str(col["type"]),
+                    "nullable": col.get("nullable", True),
+                }
+                for col in columns
+            ]
+            row_count = 0
+            try:
+                from sqlalchemy import text
+                # Quote table name to avoid syntax errors with reserved keywords
+                result = connection.execute(text(f'SELECT COUNT(*) FROM "{table_name}"'))
+                row_count = result.scalar() or 0
+            except Exception:
+                pass
+            tables_meta.append(
+                {"table_name": table_name, "columns": col_meta, "row_count": row_count}
+            )
+
+        return {"tables": tables_meta}
+
+    schema = await db.run_sync(_sync_extract)
+    SCHEMA_CACHE["schema"] = schema
+    SCHEMA_CACHE["description"] = build_schema_description(schema)
+    SCHEMA_CACHE["ingested_at"] = pd.Timestamp.now().isoformat()

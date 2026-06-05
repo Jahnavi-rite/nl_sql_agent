@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Any
+
 import structlog
 from starlette.responses import JSONResponse
 from starlette.types import ASGIApp
@@ -13,7 +15,7 @@ class MaintenanceMiddleware:
     def __init__(self, app: ASGIApp) -> None:
         self.app = app
 
-    async def __call__(self, scope, receive, send) -> None:
+    async def __call__(self, scope: Any, receive: Any, send: Any) -> None:
         if not settings.MAINTENANCE_MODE:
             await self.app(scope, receive, send)
             return

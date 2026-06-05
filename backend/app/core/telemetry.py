@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Any
+
 import structlog
 from opentelemetry import trace
 from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
@@ -8,11 +10,11 @@ from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
 try:
     from opentelemetry.instrumentation.httpx import HTTPXClientInstrumentor
 except ImportError:
-    HTTPXClientInstrumentor = None
+    HTTPXClientInstrumentor = None  # type: ignore[assignment,misc]
 try:
     from opentelemetry.instrumentation.sqlalchemy import SQLAlchemyInstrumentor
 except ImportError:
-    SQLAlchemyInstrumentor = None
+    SQLAlchemyInstrumentor = None  # type: ignore[assignment,misc]
 from opentelemetry.sdk.resources import Resource
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import BatchSpanProcessor
@@ -54,7 +56,7 @@ def setup_telemetry(app: ASGIApp) -> None:
     trace.set_tracer_provider(provider)
     _tracer = provider.get_tracer(__name__)
 
-    FastAPIInstrumentor.instrument_app(app, tracer_provider=provider)
+    FastAPIInstrumentor.instrument_app(app, tracer_provider=provider)  # type: ignore[arg-type]
     if HTTPXClientInstrumentor is not None:
         HTTPXClientInstrumentor().instrument()
     try:
@@ -87,7 +89,7 @@ class TracingMiddleware:
     def __init__(self, app: ASGIApp) -> None:
         self.app = app
 
-    async def __call__(self, scope, receive, send) -> None:
+    async def __call__(self, scope: Any, receive: Any, send: Any) -> None:
         if scope["type"] not in ("http", "websocket"):
             await self.app(scope, receive, send)
             return

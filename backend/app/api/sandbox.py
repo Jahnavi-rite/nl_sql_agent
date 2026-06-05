@@ -19,7 +19,7 @@ from docker.errors import DockerException
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
-from app.sandbox.manager import SandboxManager
+from app.sandbox.manager import Sandbox, SandboxManager
 
 router = APIRouter(prefix="/sandbox", tags=["sandbox"])
 logger = logging.getLogger(__name__)
@@ -217,7 +217,7 @@ async def run_sandbox_sql(payload: SandboxRunRequest) -> SandboxRunResponse:
     )
 
 
-async def _create_sandbox(manager: SandboxManager, dialect: Dialect):
+async def _create_sandbox(manager: SandboxManager, dialect: Dialect) -> Sandbox:
     """Create a sandbox with an HTTP-friendly timeout and error message."""
     try:
         return await asyncio.wait_for(

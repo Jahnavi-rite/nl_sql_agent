@@ -13,6 +13,9 @@ from unittest.mock import AsyncMock, patch
 import pytest
 import pytest_asyncio
 from sqlalchemy import event
+
+from app.core.config import settings
+settings.APP_ENV = "testing"
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from app.models import Base

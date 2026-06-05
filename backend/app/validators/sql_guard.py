@@ -194,7 +194,7 @@ def _collect_functions(tree: exp.Expression) -> list[str]:
         if isinstance(node, exp.Anonymous):
             funcs.append(node.name.lower())
         elif isinstance(node, exp.Func):
-            funcs.append(node.sql_name().lower())
+            funcs.append(node.sql_name().lower())  # type: ignore[no-untyped-call]
     return funcs
 
 

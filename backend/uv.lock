@@ -912,7 +912,7 @@ name = "flaml"
 version = "2.6.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "numpy" },
+    { name = "numpy", marker = "python_full_version < '3.13'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/c4/9a/ea9ad379febe29c83daaa31b04a659f107fcd12c667a5892480dda994bb6/flaml-2.6.0.tar.gz", hash = "sha256:fee0a8419d8a4862afe8aa817c312c7479f4d137b806430ecf3b3c7033270730", size = 315838, upload-time = "2026-04-28T02:03:27.021Z" }
 wheels = [
@@ -2390,7 +2390,7 @@ wheels = [
 [[package]]
 name = "nl-sql-agent"
 version = "0.1.0"
-source = { virtual = "." }
+source = { editable = "." }
 dependencies = [
     { name = "alembic" },
     { name = "asyncpg" },
@@ -2410,7 +2410,6 @@ dependencies = [
     { name = "pandas" },
     { name = "prometheus-client" },
     { name = "psycopg2-binary" },
-    { name = "pyautogen" },
     { name = "pydantic" },
     { name = "pydantic-settings" },
     { name = "python-dotenv" },
@@ -2423,6 +2422,9 @@ dependencies = [
 ]
 
 [package.optional-dependencies]
+debate = [
+    { name = "pyautogen", marker = "python_full_version < '3.13'" },
+]
 dev = [
     { name = "aiosqlite" },
     { name = "httpx" },
@@ -2455,7 +2457,7 @@ requires-dist = [
     { name = "pandas", specifier = ">=2.0,<3" },
     { name = "prometheus-client", specifier = ">=0.20,<1" },
     { name = "psycopg2-binary", specifier = ">=2.9,<3" },
-    { name = "pyautogen", specifier = "==0.2.35" },
+    { name = "pyautogen", marker = "python_full_version < '3.13' and extra == 'debate'", specifier = ">=0.2.35,<0.3" },
     { name = "pydantic", specifier = ">=2.6,<3" },
     { name = "pydantic-settings", specifier = ">=2.2,<3" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0,<9" },
@@ -2470,7 +2472,7 @@ requires-dist = [
     { name = "structlog", specifier = ">=24.1,<25" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.29,<1" },
 ]
-provides-extras = ["dev"]
+provides-extras = ["debate", "dev"]
 
 [[package]]
 name = "numpy"
@@ -3497,16 +3499,16 @@ name = "pyautogen"
 version = "0.2.35"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "diskcache" },
-    { name = "docker" },
-    { name = "flaml" },
-    { name = "numpy" },
-    { name = "openai" },
-    { name = "packaging" },
-    { name = "pydantic" },
-    { name = "python-dotenv" },
-    { name = "termcolor" },
-    { name = "tiktoken" },
+    { name = "diskcache", marker = "python_full_version < '3.13'" },
+    { name = "docker", marker = "python_full_version < '3.13'" },
+    { name = "flaml", marker = "python_full_version < '3.13'" },
+    { name = "numpy", marker = "python_full_version < '3.13'" },
+    { name = "openai", marker = "python_full_version < '3.13'" },
+    { name = "packaging", marker = "python_full_version < '3.13'" },
+    { name = "pydantic", marker = "python_full_version < '3.13'" },
+    { name = "python-dotenv", marker = "python_full_version < '3.13'" },
+    { name = "termcolor", marker = "python_full_version < '3.13'" },
+    { name = "tiktoken", marker = "python_full_version < '3.13'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/da/08/c4b43fba667a834fab53c6c295631eae032b2e667eb4ece2f7f6236bb9d5/pyautogen-0.2.35.tar.gz", hash = "sha256:7442e0bbe8810678a08a701a645d5734f887ccc223b2d21cd95bf68be29872a1", size = 289607, upload-time = "2024-08-21T00:24:41.309Z" }
 wheels = [

@@ -119,7 +119,7 @@ class SandboxContainer:
             return False
         try:
             c = self._client.containers.get(self.container_id)
-            return c.status == "running"
+            return bool(c.status == "running")
         except NotFound:
             return False
 

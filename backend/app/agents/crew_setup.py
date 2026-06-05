@@ -59,7 +59,7 @@ def _llm_config() -> Any:
 def make_step_callback(
     sid: str,
     rid: str,
-) -> Callable:
+) -> Callable[[Any], None]:
     from app.services.stream_events import make_progress
     from app.services.stream_manager import stream_manager
 
@@ -78,7 +78,7 @@ def make_step_callback(
 def make_task_callback(
     sid: str,
     rid: str,
-) -> Callable:
+) -> Callable[[Any], None]:
     from app.services.stream_events import make_artifact, make_complete, make_start
     from app.services.stream_manager import stream_manager
 
@@ -233,18 +233,18 @@ def extract_sql(output: str) -> str:
     pattern = r"```(?:sql)?\s*\n?([\s\S]*?)```"
     matches = re.findall(pattern, output)
     if matches:
-        sql = matches[-1].strip()
+        sql: str = str(matches[-1]).strip()
         try:
             parsed = json.loads(sql)
-            if "query_sql" in parsed:
-                return parsed["query_sql"]
+            if isinstance(parsed, dict) and "query_sql" in parsed:
+                return str(parsed["query_sql"])
         except json.JSONDecodeError:
             pass
         return sql
     try:
         parsed = json.loads(output)
-        if "query_sql" in parsed:
-            return parsed["query_sql"]
+        if isinstance(parsed, dict) and "query_sql" in parsed:
+            return str(parsed["query_sql"])
     except json.JSONDecodeError:
         pass
     return output.strip()

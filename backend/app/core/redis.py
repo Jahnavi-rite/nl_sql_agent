@@ -3,13 +3,13 @@
 from __future__ import annotations
 
 import json
-from typing import Any
+from typing import Any, cast
 
 import redis.asyncio as aioredis
 
 from app.core.config import settings
 
-redis_client = aioredis.from_url(
+redis_client = aioredis.from_url(  # type: ignore[no-untyped-call]
     settings.REDIS_URL,
     decode_responses=True,
 )
@@ -40,7 +40,7 @@ async def get_session_context(session_id: str) -> list[dict[str, Any]]:
     raw = await redis_client.get(_ctx_key(session_id))
     if raw is None:
         return []
-    return json.loads(raw)
+    return cast(list[dict[str, Any]], json.loads(raw))
 
 
 async def append_session_context(
@@ -86,7 +86,7 @@ async def get_sandbox_handle(session_id: str) -> dict[str, Any] | None:
     raw = await redis_client.get(_sbx_key(session_id))
     if raw is None:
         return None
-    return json.loads(raw)
+    return cast(dict[str, Any], json.loads(raw))
 
 
 async def clear_sandbox_handle(session_id: str) -> None:

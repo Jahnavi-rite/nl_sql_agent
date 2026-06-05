@@ -91,7 +91,7 @@ warn_unused_configs = true
 plugins = ["pydantic.mypy"]
 
 [[tool.mypy.overrides]]
-module = ["structlog.*", "asyncpg.*", "redis.*", "sqlglot.*", "pandas.*"]
+module = ["structlog.*", "asyncpg.*", "redis.*", "sqlglot.*", "pandas.*", "autogen.*", "docker.*", "crewai.*", "langfuse.*"]
 ignore_missing_imports = true
 
 # ---------------------------------------------------------------------------

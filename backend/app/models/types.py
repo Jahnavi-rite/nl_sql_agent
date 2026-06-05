@@ -35,14 +35,14 @@ class UUIDCompat(TypeDecorator[Any]):
             return dialect.type_descriptor(PG_UUID(as_uuid=True))
         return dialect.type_descriptor(String(36))
 
-    def process_bind_param(self, value: Any, dialect: Dialect) -> str | None:
+    def process_bind_param(self, value: Any, dialect: Dialect) -> Any:
         if value is None:
             return value
         if dialect.name == "postgresql":
             return value
         return str(value)
 
-    def process_result_value(self, value: Any, dialect: Dialect) -> uuid.UUID | None:
+    def process_result_value(self, value: Any, dialect: Dialect) -> Any:
         if value is None:
             return value
         if dialect.name == "postgresql":

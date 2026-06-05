@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import time
+from typing import Any
 
 import structlog
 from prometheus_client import Counter, Gauge, Histogram, generate_latest
@@ -145,7 +146,7 @@ class MetricsMiddleware:
     def __init__(self, app: ASGIApp) -> None:
         self.app = app
 
-    async def __call__(self, scope, receive, send) -> None:
+    async def __call__(self, scope: Any, receive: Any, send: Any) -> None:
         if scope["type"] != "http":
             await self.app(scope, receive, send)
             return
@@ -156,7 +157,7 @@ class MetricsMiddleware:
         start = time.perf_counter()
         status = [200]
 
-        async def _send_wrapper(msg):
+        async def _send_wrapper(msg: Any) -> None:
             if msg.get("type") == "http.response.start":
                 status[0] = msg.get("status", 200)
             await send(msg)

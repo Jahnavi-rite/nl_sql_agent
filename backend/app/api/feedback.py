@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import uuid
+from typing import Any
 
 import structlog
 from fastapi import APIRouter, Depends, HTTPException
@@ -37,7 +38,7 @@ class FeedbackResponse(BaseModel):
     query_sql: str
     confidence: float | None = None
     rationale: str | None = None
-    execution_results: list[dict] = Field(default_factory=list)
+    execution_results: list[dict[str, Any]] = Field(default_factory=list)
     execution_rows: int = 0
     execution_ms: float | None = None
     error_message: str | None = None

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import uuid
+from typing import Any
 
 import structlog
 from starlette.responses import JSONResponse
@@ -36,14 +37,14 @@ class StructuredErrorMiddleware:
     def __init__(self, app: ASGIApp) -> None:
         self.app = app
 
-    async def __call__(self, scope, receive, send) -> None:
+    async def __call__(self, scope: Any, receive: Any, send: Any) -> None:
         if scope["type"] != "http":
             await self.app(scope, receive, send)
             return
 
         trace_id = str(uuid.uuid4())[:8]
 
-        async def _send_wrapper(msg):
+        async def _send_wrapper(msg: Any) -> None:
             if msg.get("type") == "http.response.start":
                 headers = dict(msg.get("headers", []))
                 headers.setdefault(b"x-trace-id", trace_id.encode())
@@ -103,7 +104,7 @@ def _http_status(error_code: str) -> int:
     }.get(error_code, 500)
 
 
-def _build_error(exc: Exception, error_code: str, trace_id: str) -> dict:
+def _build_error(exc: Exception, error_code: str, trace_id: str) -> dict[str, Any]:
     return {
         "error_code": ERROR_CODES.get(error_code, "ERR_INTERNAL"),
         "message": _safe_message(exc, error_code),

@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import uuid
+from typing import Any
 
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, UploadFile
@@ -65,6 +66,24 @@ async def upload_dataset(
             dialect,
             filename=file.filename,
         )
+
+        from app.services.dataset_service import parse_csv, parse_excel
+        df = parse_excel(content) if ext in ("xls", "xlsx") else parse_csv(content)
+
+        def _to_sql_sync(session: Any) -> None:
+            conn = session.connection()
+            method = "multi" if conn.dialect.name == "postgresql" else None
+            df.to_sql(
+                name=ingested["table_name"],
+                con=conn,
+                if_exists="replace",
+                index=False,
+                chunksize=5000,
+                method=method,
+            )
+
+        await db.run_sync(_to_sql_sync)
+
     except Exception as exc:
         logger.error("dataset_ingestion_failed", session_id=str(session_id), error=str(exc))
         raise HTTPException(status_code=500, detail=f"Dataset ingestion failed: {exc}") from exc
@@ -83,6 +102,10 @@ async def upload_dataset(
     db.add(dataset)
     await db.commit()
     await db.refresh(dataset)
+
+    # Rebuild schema cache with the new dataset
+    from app.services.startup_ingestion import update_schema_cache
+    await update_schema_cache(db)
 
     logger.info(
         "dataset_uploaded",
@@ -114,7 +137,7 @@ async def upload_dataset(
 async def list_datasets(
     session_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-) -> list[dict]:
+) -> list[dict[str, Any]]:
     """List all uploaded datasets for a session."""
     from sqlalchemy import select
 

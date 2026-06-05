@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import hashlib
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Literal
 
 from app.agents.debate.models import DebateResult, DebateSettings, TerminationReason
 
@@ -43,7 +43,7 @@ def check_termination(
     author_result: dict[str, Any] | None,
     critic_result: dict[str, Any] | None,
     current_hash: str | None = None,
-) -> tuple[bool, TerminationReason]:
+) -> tuple[bool, TerminationReason | Literal["continue"]]:
     if state.termination_reason is not None:
         return True, state.termination_reason
 

@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import time
 from contextlib import suppress
+from typing import Any
 
 import docker
 import structlog
@@ -93,15 +94,16 @@ class SandboxJanitor:
             except Exception as exc:
                 logger.warning("janitor_container_error", container_id=container.short_id, error=str(exc))
 
-    def _find_sandbox_containers(self) -> list:
+    def _find_sandbox_containers(self) -> list[Any]:
         if self._docker_client is None:
             return []
-        return self._docker_client.containers.list(
+        from typing import cast
+        return cast(list[Any], self._docker_client.containers.list(
             all=False,
             filters={"label": _SANDBOX_LABEL_PREFIX},
-        )
+        ))
 
-    def _destroy_container(self, container) -> None:
+    def _destroy_container(self, container: Any) -> None:
         with suppress(Exception):
             container.stop(timeout=5)
             container.remove(force=True, v=True)

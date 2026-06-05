@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from typing import Any
 
 import structlog
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
@@ -16,7 +17,7 @@ BUFFERED_EVENT_BATCH_SIZE = 20
 
 
 @router.websocket("/sessions/{session_id}/stream")
-async def session_stream(ws: WebSocket, session_id: str):
+async def session_stream(ws: WebSocket, session_id: str) -> None:
     await ws.accept()
     conn_start = asyncio.get_event_loop().time()
 
@@ -92,7 +93,7 @@ async def session_stream(ws: WebSocket, session_id: str):
         )
 
 
-async def _next_event_or_message(stream, ws):
+async def _next_event_or_message(stream: Any, ws: WebSocket) -> Any:
     """Wait for either a queue event or a client message.
 
     Returns event dict if from queue, None if stream is done,
