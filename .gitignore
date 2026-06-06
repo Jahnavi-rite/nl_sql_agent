@@ -47,6 +47,9 @@ Thumbs.db
 # --- Docker ---
 docker/data/
 
+# --- Large data files ---
+oracle_metadata_ALL_26b.csv
+
 # --- Logs ---
 *.log
 logs/

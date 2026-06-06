@@ -210,17 +210,6 @@ async def generate(
             response_length=len(raw_response),
         )
 
-        _trace_llm(
-            rid=rid,
-            prompt=prompt,
-            system_prompt=SYSTEM_PROMPT,
-            dialect=dialect,
-            schema_metadata=schema_metadata,
-            raw_response=raw_response,
-            elapsed_ms=elapsed_ms,
-            error=error,
-        )
-
     parsed = _extract_json(raw_response)
     _validate_response(parsed)
 
@@ -231,43 +220,4 @@ async def generate(
     )
 
 
-def _trace_llm(
-    *,
-    rid: str,
-    prompt: str,
-    system_prompt: str,
-    dialect: str,
-    schema_metadata: str,
-    raw_response: str,
-    elapsed_ms: float,
-    error: str | None = None,
-) -> None:
-    try:
-        from app.core.langfuse_tracer import trace_llm_call  # noqa: PLC0415
 
-        parsed_sql = ""
-        parsed_confidence = None
-        if not error:
-            try:
-                parsed = _extract_json(raw_response)
-                _validate_response(parsed)
-                parsed_sql = parsed.get("query_sql", "")
-                parsed_confidence = float(parsed.get("confidence", 0))
-            except Exception:
-                pass
-
-        trace_llm_call(
-            request_id=rid,
-            model=settings.OPENAI_MODEL,
-            dialect=dialect,
-            prompt=prompt,
-            system_prompt=system_prompt,
-            response=raw_response if not error else None,
-            query_sql=parsed_sql,
-            confidence=parsed_confidence,
-            latency_ms=round(elapsed_ms, 1),
-            temperature=settings.LLM_TEMPERATURE,
-            error=error,
-        )
-    except Exception:
-        pass

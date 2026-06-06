@@ -9,7 +9,6 @@
 #   - redis:     Redis 7 cache
 #   - backend:   FastAPI application
 #   - frontend:  Next.js application
-#   - jaeger:    OpenTelemetry trace visualization (UIs at :16686)
 
 services:
   # ---------------------------------------------------------------------------
@@ -56,42 +55,6 @@ services:
       - nlsql-network
 
   # ---------------------------------------------------------------------------
-  # Jaeger — OpenTelemetry trace visualization
-  # ---------------------------------------------------------------------------
-  jaeger:
-    image: jaegertracing/all-in-one:latest
-    container_name: nlsql-jaeger
-    restart: unless-stopped
-    ports:
-      - "16686:16686"   # UI
-      - "4317:4317"     # OTLP gRPC
-      - "4318:4318"     # OTLP HTTP
-    environment:
-      COLLECTOR_OTLP_ENABLED: "true"
-    networks:
-      - nlsql-network
-
-  # ---------------------------------------------------------------------------
-  # Langfuse — LLM prompt/response tracing
-  # ---------------------------------------------------------------------------
-  langfuse:
-    image: langfuse/langfuse:latest
-    container_name: nlsql-langfuse
-    restart: unless-stopped
-    ports:
-      - "3030:3000"     # UI
-    environment:
-      DATABASE_URL: postgresql://nlsql:nlsql_dev_password@postgres:5432/nlsql_agent
-      NEXTAUTH_SECRET: nlsql-langfuse-secret-key-change-in-prod
-      SALT: nlsql-langfuse-salt-change-in-prod
-      ENCRYPTION_KEY: 0000000000000000000000000000000000000000000000000000000000000000
-    depends_on:
-      postgres:
-        condition: service_healthy
-    networks:
-      - nlsql-network
-
-  # ---------------------------------------------------------------------------
   # Backend — FastAPI application
   # ---------------------------------------------------------------------------
   backend:
@@ -106,10 +69,6 @@ services:
       POSTGRES_HOST: postgres
       REDIS_HOST: redis
       SANDBOX_ATTACH_CONTAINER: nlsql-backend
-      OTLP_ENDPOINT: http://jaeger:4317
-      OTLP_ENABLED: "true"
-      LANGFUSE_HOST: http://langfuse:3000
-      LANGFUSE_ENABLED: "true"
     ports:
       - "${BACKEND_PORT:-8000}:8000"
     volumes:
@@ -123,10 +82,11 @@ services:
       redis:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
-      interval: 10s
-      timeout: 5s
-      retries: 3
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=10)"]
+      interval: 15s
+      timeout: 15s
+      retries: 5
+      start_period: 30s
     networks:
       - nlsql-network
 

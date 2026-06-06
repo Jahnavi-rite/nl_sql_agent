@@ -5,7 +5,6 @@ This is the main module that creates and configures the FastAPI app.
 It sets up:
 - CORS (allows the frontend to call the backend)
 - Structured logging (JSON logs for production)
-- OpenTelemetry tracing (Jaeger export)
 - Prometheus /metrics endpoint
 - Rate limiting middleware
 - Structured error handling
@@ -43,7 +42,6 @@ from app.core.maintenance import MaintenanceMiddleware
 from app.core.metrics import MetricsMiddleware, metrics_response
 from app.core.rate_limiter import RateLimitMiddleware
 from app.core.redis import redis_client
-from app.core.telemetry import TracingMiddleware, setup_telemetry
 from app.services.janitor import SandboxJanitor
 from app.services.stream_manager import stream_manager
 
@@ -169,14 +167,6 @@ app.add_middleware(RateLimitMiddleware)
 
 # 5. Metrics collection (latency, counters)
 app.add_middleware(MetricsMiddleware)
-
-# 6. OpenTelemetry tracing (innermost — captures all spans)
-app.add_middleware(TracingMiddleware)
-
-# ---------------------------------------------------------------------------
-# OpenTelemetry instrumentation
-# ---------------------------------------------------------------------------
-setup_telemetry(app)
 
 # ---------------------------------------------------------------------------
 # Routes

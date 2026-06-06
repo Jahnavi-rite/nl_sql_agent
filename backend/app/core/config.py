@@ -72,11 +72,6 @@ class Settings(BaseSettings):
     DEBATE_MAX_ROUNDS: int = 3
     DEBATE_TOKEN_BUDGET: int = 6_000
 
-    # --- OpenTelemetry / Jaeger ---
-    OTLP_ENDPOINT: str = "http://nlsql-jaeger:4317"
-    OTLP_SERVICE_NAME: str = "nl-sql-agent"
-    OTLP_ENABLED: bool = True
-
     # --- Prometheus / Metrics ---
     METRICS_ENABLED: bool = True
 
@@ -84,12 +79,6 @@ class Settings(BaseSettings):
     RATE_LIMIT_REQUESTS_PER_MINUTE: int = 30
     RATE_LIMIT_SESSION_REQUESTS_PER_MINUTE: int = 10
     RATE_LIMIT_WS_PER_SESSION: int = 5
-
-    # --- Langfuse ---
-    LANGFUSE_PUBLIC_KEY: str = ""
-    LANGFUSE_SECRET_KEY: str = ""
-    LANGFUSE_HOST: str = "http://nlsql-langfuse:3000"
-    LANGFUSE_ENABLED: bool = True
 
     # --- Maintenance ---
     MAINTENANCE_MODE: bool = False
