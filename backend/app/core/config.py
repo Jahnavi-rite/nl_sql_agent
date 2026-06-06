@@ -67,6 +67,29 @@ class Settings(BaseSettings):
     OPENAI_MODEL: str = "gpt-4o"
     OPENAI_API_BASE: str = "https://api.openai.com/v1"
     LLM_TIMEOUT_SECONDS: int = 60
+
+    @property
+    def OPENAI_MODEL_RAW(self) -> str:
+        """Model id for direct OpenAI-compatible HTTP calls (single_shot, AutoGen).
+
+        OpenAI-compatible servers (incl. a LiteLLM proxy) expect the deployment
+        id exactly as registered, e.g. ``qwen3.6`` — NOT ``openai/qwen3.6``.
+        Sending a litellm provider prefix here yields a 401/400 "model not found".
+        So we strip any leading ``provider/`` segment.
+        """
+        model = self.OPENAI_MODEL.strip()
+        return model.split("/", 1)[1] if "/" in model else model
+
+    @property
+    def OPENAI_MODEL_LITELLM(self) -> str:
+        """Model id for litellm-backed SDKs (CrewAI).
+
+        litellm requires a provider prefix to route the call; without one it
+        raises "LLM Provider NOT provided". For an OpenAI-compatible base_url the
+        correct prefix is ``openai/``, so we add it when missing.
+        """
+        model = self.OPENAI_MODEL.strip()
+        return model if "/" in model else f"openai/{model}"
     LLM_TEMPERATURE: float = 0.1
     ENABLE_DEBATE: bool = False
     DEBATE_MAX_ROUNDS: int = 3

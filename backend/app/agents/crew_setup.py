@@ -48,7 +48,7 @@ def _llm_config() -> Any:
     from crewai import LLM
 
     return LLM(
-        model=settings.OPENAI_MODEL,
+        model=settings.OPENAI_MODEL_LITELLM,
         api_key=settings.OPENAI_API_KEY,
         base_url=settings.OPENAI_API_BASE,
         temperature=settings.LLM_TEMPERATURE,

@@ -102,7 +102,7 @@ def _build_messages(prompt: str, dialect: str, schema_metadata: str) -> list[dic
 
 async def _call_llm(messages: list[dict[str, str]]) -> str:
     api_key = settings.OPENAI_API_KEY
-    model = settings.OPENAI_MODEL
+    model = settings.OPENAI_MODEL_RAW
     base_url = settings.OPENAI_API_BASE.rstrip("/")
 
     headers = {

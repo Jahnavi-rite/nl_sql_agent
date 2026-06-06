@@ -35,7 +35,10 @@ class DebateParticipant(ABC):
 
 def _build_llm_config() -> dict[str, Any]:
     return {
-        "model": settings.OPENAI_MODEL,
+        # AutoGen 0.2 talks to the endpoint via the openai SDK directly (not
+        # litellm), so the model must be the bare deployment id the proxy
+        # registered (e.g. "qwen3.6") — a litellm "openai/" prefix would 401.
+        "model": settings.OPENAI_MODEL_RAW,
         "api_key": settings.OPENAI_API_KEY,
         "base_url": settings.OPENAI_API_BASE.rstrip("/"),
         "temperature": settings.LLM_TEMPERATURE,
