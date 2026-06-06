@@ -114,6 +114,13 @@ class Settings(BaseSettings):
     LANGFUSE_HOST: str = "http://nlsql-langfuse:3000"
     LANGFUSE_ENABLED: bool = True
 
+    # --- CSV Ingestion ---
+    # Max rows read per CSV at startup and when seeding a session sandbox.
+    # None = no limit (load the full file). The reference catalogs span
+    # ~150k rows each and key JDE tables (e.g. F0005) live past row 50k, so a
+    # low cap silently hides them — queries then return zero rows.
+    CSV_INGEST_MAX_ROWS: int | None = None
+
     # --- Maintenance ---
     MAINTENANCE_MODE: bool = False
 

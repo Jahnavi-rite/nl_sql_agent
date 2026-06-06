@@ -129,8 +129,11 @@ async def _load_dataframe_into_sandbox(
     logger.info("creating_table", sql=create_sql[:200])
     await executor.execute_ddl(create_sql, timeout=timeout)
 
-    # 2. Insert data in batches
-    batch_size = 500 if dialect == "postgres" else 1
+    # 2. Insert data in batches. PostgreSQL INSERTs use inline literal VALUES
+    # (no bind params, so the 65535-parameter limit does not apply); large
+    # batches just mean fewer round-trips. Reference seeding loads ~150k rows,
+    # so a small batch size dominates ingestion time.
+    batch_size = 5000 if dialect == "postgres" else 1
     total_rows = 0
     for start in range(0, len(df), batch_size):
         batch = df.iloc[start : start + batch_size]
@@ -156,10 +159,14 @@ async def _load_dataframe_into_sandbox(
 
 
 def _build_postgres_insert(table_name: str, batch: pd.DataFrame) -> str:
-    """Build a PostgreSQL multi-value INSERT statement."""
+    """Build a PostgreSQL multi-value INSERT statement.
+
+    Uses ``itertuples`` rather than ``iterrows`` — the latter materialises a
+    Series per row and is ~5x slower, which dominates reference-data seeding.
+    """
     col_names = [f'"{c}"' for c in batch.columns]
     values: list[str] = []
-    for _, row in batch.iterrows():
+    for row in batch.itertuples(index=False, name=None):
         row_vals: list[str] = []
         for val in row:
             if pd.isna(val):

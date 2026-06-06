@@ -99,7 +99,7 @@ def ingest_csv_to_postgres(csv_path: str, sync_engine: Any) -> dict[str, Any]:
         logger.info("table_already_exists", table_name=table_name, rows=row_count)
         return {"table_name": table_name, "filename": filename, "row_count": row_count}
 
-    df = pd.read_csv(csv_path, nrows=50000)
+    df = pd.read_csv(csv_path, nrows=settings.CSV_INGEST_MAX_ROWS)
     df.columns = sanitize_column_names(list(df.columns))
 
     with sync_engine.begin() as conn:
@@ -242,6 +242,60 @@ async def run_startup_ingestion() -> dict[str, Any]:
             engine.dispose()
 
     return await loop.run_in_executor(None, _sync_ingest)
+
+
+async def seed_sandbox_with_reference_data(
+    executor: Any,
+    dialect: str = "postgres",
+    *,
+    row_limit: int | None = -1,
+    timeout: int = 300,
+) -> list[str]:
+    """Load the startup reference CSVs into a freshly-created session sandbox.
+
+    The agent's schema (cached from the main DB at startup) advertises tables
+    such as ``jde_tables`` and ``consolidated_fbdi``, so generated SQL targets
+    those tables. But every session executes in its own *empty* sandbox
+    container — without this step the sandbox has no such tables and every
+    query fails with "relation ... does not exist".
+
+    We reuse the exact same filename→table-name and column sanitisation as the
+    main ingestion (:func:`sanitize_table_name` / :func:`sanitize_column_names`)
+    so the sandbox schema matches what the agent was shown.
+    """
+    if dialect != "postgres":
+        # Reference data is PostgreSQL-oriented and the Oracle insert path is
+        # one statement per row (impractical for tens of thousands of rows).
+        logger.info("sandbox_seed_skipped_non_postgres", dialect=dialect)
+        return []
+
+    from app.services.dataset_service import load_dataframe_into_sandbox
+
+    # row_limit=-1 is the sentinel for "fall back to the configured cap"
+    # (None there means load the full file).
+    effective_limit = settings.CSV_INGEST_MAX_ROWS if row_limit == -1 else row_limit
+
+    loop = asyncio.get_running_loop()
+    csv_files = await loop.run_in_executor(None, find_csv_files)
+    seeded: list[str] = []
+    for csv_path in csv_files:
+        table_name = sanitize_table_name(os.path.basename(csv_path))
+
+        def _read(path: str = csv_path) -> pd.DataFrame:
+            frame = pd.read_csv(path, nrows=effective_limit)
+            frame.columns = sanitize_column_names(list(frame.columns))
+            return frame
+
+        try:
+            df = await loop.run_in_executor(None, _read)
+            await load_dataframe_into_sandbox(executor, df, dialect, table_name, timeout=timeout)
+            seeded.append(table_name)
+            logger.info("sandbox_seeded_table", table_name=table_name, rows=len(df))
+        except Exception as exc:
+            logger.error("sandbox_seed_failed", file=csv_path, table=table_name, error=str(exc))
+
+    logger.info("sandbox_seed_complete", tables=seeded)
+    return seeded
 
 
 def get_cached_schema() -> dict[str, Any]:

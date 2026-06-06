@@ -581,6 +581,16 @@ async def get_or_create_session_sandbox(
     logger.info("creating_fresh_session_sandbox", session_id=str(session_id), dialect=dialect_mapped)
     sandbox = await sandbox_manager.create(dialect_mapped)
 
+    # 2b. Seed the fresh sandbox with the startup reference tables. The agent
+    # generates SQL against the schema cached from the main DB (jde_tables,
+    # consolidated_fbdi), but a fresh sandbox container is empty — without this
+    # step every query fails with "relation ... does not exist".
+    try:
+        from app.services.startup_ingestion import seed_sandbox_with_reference_data
+        await seed_sandbox_with_reference_data(sandbox._executor, dialect_mapped)
+    except Exception as exc:
+        logger.warning("sandbox_seed_error", session_id=str(session_id), error=str(exc))
+
     # 3. Save the handle back to Redis
     handle_data = {
         "dialect": dialect_mapped,
