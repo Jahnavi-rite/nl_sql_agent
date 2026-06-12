@@ -8,13 +8,11 @@ import uuid
 from typing import Any
 
 import structlog
-from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agents.single_shot import AgentError
 from app.agents.single_shot import generate as llm_generate
 from app.core.config import settings
-from app.core.database import engine as async_engine
 from app.models.enums import FeedbackAction, IterationStatus, RequestStatus
 from app.models.session import Iteration, Request
 from app.services.session_service import (
@@ -278,82 +276,30 @@ async def _handle_reject(
             "latency_ms": round(elapsed, 1),
         }
 
-    # Execute the regenerated SQL
-    exec_start = time.perf_counter()
-    execution_error: str | None = None
-    status = "completed"
-    rows = []
-    row_count = 0
-    query_ms = 0.0
-    try:
-        async with async_engine.connect() as conn:
-            db_result = await conn.execute(text(agent_response.query_sql))
-            query_ms = (time.perf_counter() - exec_start) * 1000
-            raw_rows = db_result.fetchall()
-            col_names = list(db_result.keys())
-            rows = [dict(zip(col_names, row, strict=False)) for row in raw_rows]
-            row_count = len(rows)
-            logger.info(
-                "regen_query_executed",
-                request_id=str(req.id),
-                rows=row_count,
-                latency_ms=round(query_ms, 1),
-            )
-    except Exception as exc:
-        execution_error = f"Query execution failed: {exc}"
-        status = "failed"
-        logger.error("regen_execution_failed", request_id=str(req.id), error=str(exc))
-
-    # Persist the new iteration
-    new_iter = await append_iteration(
-        db,
-        request_id=req.id,
-        generated_sql=agent_response.query_sql,
-        confidence=agent_response.confidence,
-        rationale=agent_response.rationale,
-        status=IterationStatus.EXECUTED if status == "completed" else IterationStatus.FAILED,
-        supersede_previous=False,
-    )
-    new_iter.execution_results = rows if status == "completed" else []
-    new_iter.execution_rows = row_count
-    new_iter.execution_ms = query_ms if status == "completed" else None
-    new_iter.error_message = execution_error
-    await db.commit()
-
-    await record_trace(
-        db, iteration_id=new_iter.id, agent_name="single_shot",
-        prompt=regen_context,
-        response=json.dumps({
-            "query_sql": agent_response.query_sql,
-            "confidence": agent_response.confidence,
-            "rationale": agent_response.rationale,
-        }),
-        model=settings.OPENAI_MODEL,
-    )
-
+    # Return the regenerated SQL without executing
     elapsed = (time.perf_counter() - start_time) * 1000
     logger.info(
         "regen_completed",
         request_id=str(req.id),
-        new_iteration_id=str(new_iter.id),
-        attempt=new_iter.attempt_number,
-        status=status,
+        iteration_id=str(iteration.id),
+        attempt=iteration.attempt_number,
+        status="completed",
         latency_ms=round(elapsed, 1),
     )
 
     return {
         "action": "reject",
-        "status": status,
+        "status": "completed",
         "request_status": "open",
-        "iteration_id": str(new_iter.id),
-        "attempt_number": new_iter.attempt_number,
+        "iteration_id": str(iteration.id),
+        "attempt_number": iteration.attempt_number,
         "query_sql": agent_response.query_sql,
         "confidence": agent_response.confidence,
         "rationale": agent_response.rationale,
-        "execution_results": rows if status == "completed" else [],
-        "execution_rows": row_count,
-        "execution_ms": query_ms if status == "completed" else None,
-        "error_message": execution_error,
+        "execution_results": [],
+        "execution_rows": 0,
+        "execution_ms": None,
+        "error_message": None,
         "needs_human_intervention": False,
         "latency_ms": round(elapsed, 1),
     }
@@ -403,79 +349,30 @@ async def _handle_edit(
             "latency_ms": round(elapsed, 1),
         }
 
-    # Execute the edited SQL directly (no LLM call)
-    exec_start = time.perf_counter()
-    execution_error: str | None = None
-    status = "completed"
-    rows = []
-    row_count = 0
-    query_ms = 0.0
-    try:
-        async with async_engine.connect() as conn:
-            db_result = await conn.execute(text(edited_sql))
-            query_ms = (time.perf_counter() - exec_start) * 1000
-            raw_rows = db_result.fetchall()
-            col_names = list(db_result.keys())
-            rows = [dict(zip(col_names, row, strict=False)) for row in raw_rows]
-            row_count = len(rows)
-            logger.info(
-                "edit_query_executed",
-                request_id=str(req.id),
-                rows=row_count,
-                latency_ms=round(query_ms, 1),
-            )
-    except Exception as exc:
-        execution_error = f"Query execution failed: {exc}"
-        status = "failed"
-        logger.error("edit_execution_failed", request_id=str(req.id), error=str(exc))
-
-    # Save as a new iteration (bypassing LLM)
-    new_iter = await append_iteration(
-        db,
-        request_id=req.id,
-        generated_sql=edited_sql,
-        confidence=1.0,
-        rationale="User-edited SQL — executed directly without LLM",
-        status=IterationStatus.EXECUTED if status == "completed" else IterationStatus.FAILED,
-        supersede_previous=False,
-    )
-    new_iter.execution_results = rows if status == "completed" else []
-    new_iter.execution_rows = row_count
-    new_iter.execution_ms = query_ms if status == "completed" else None
-    new_iter.error_message = execution_error
-    new_iter.is_manual_edit = True
-    await db.commit()
-
-    await record_trace(
-        db, iteration_id=new_iter.id, agent_name="manual_edit",
-        prompt="User edited SQL manually",
-        response=f"SQL: {edited_sql}\nStatus: {status}",
-        model="manual",
-    )
-
+    # Return the edited SQL without executing
     elapsed = (time.perf_counter() - start_time) * 1000
     logger.info(
         "edit_completed",
         request_id=str(req.id),
-        new_iteration_id=str(new_iter.id),
-        attempt=new_iter.attempt_number,
-        status=status,
+        iteration_id=str(iteration.id),
+        attempt=iteration.attempt_number,
+        status="completed",
         latency_ms=round(elapsed, 1),
     )
 
     return {
         "action": "edit",
-        "status": status,
+        "status": "completed",
         "request_status": "open",
-        "iteration_id": str(new_iter.id),
-        "attempt_number": new_iter.attempt_number,
+        "iteration_id": str(iteration.id),
+        "attempt_number": iteration.attempt_number,
         "query_sql": edited_sql,
         "confidence": 1.0,
         "rationale": "User-edited SQL",
-        "execution_results": rows if status == "completed" else [],
-        "execution_rows": row_count,
-        "execution_ms": query_ms if status == "completed" else None,
-        "error_message": execution_error,
+        "execution_results": [],
+        "execution_rows": 0,
+        "execution_ms": None,
+        "error_message": None,
         "needs_human_intervention": False,
         "latency_ms": round(elapsed, 1),
     }

@@ -172,7 +172,11 @@ export default function NlSqlInterface() {
     setFeedbackLoading(true);
     setFeedbackError(null);
     try {
-      const resp = await submitFeedback(sessionId, latest.iteration_id, "approve");
+      const resp = await submitFeedback(
+        sessionId,
+        latest.iteration_id,
+        "approve",
+      );
       setRequestStatus(resp.request_status);
       await refreshRequestDetails();
     } catch (err) {
@@ -205,9 +209,6 @@ export default function NlSqlInterface() {
               query_sql: resp.query_sql,
               confidence: resp.confidence,
               rationale: resp.rationale,
-              execution_results: resp.execution_results,
-              execution_rows: resp.execution_rows,
-              execution_ms: resp.execution_ms,
               status: resp.status,
               error_message: resp.error_message,
             }
@@ -235,7 +236,7 @@ export default function NlSqlInterface() {
       );
       setRequestStatus(resp.request_status);
       setEditMode(false);
-      // Update result with edited execution data
+      // Update result with edited SQL
       setResult((prev) =>
         prev
           ? {
@@ -243,9 +244,6 @@ export default function NlSqlInterface() {
               query_sql: resp.query_sql,
               confidence: resp.confidence,
               rationale: resp.rationale,
-              execution_results: resp.execution_results,
-              execution_rows: resp.execution_rows,
-              execution_ms: resp.execution_ms,
               status: resp.status,
               error_message: resp.error_message,
             }
@@ -259,10 +257,15 @@ export default function NlSqlInterface() {
     }
   }
 
-  const { events: agentEvents, connected: streamConnected, reconnecting: streamReconnecting, isPolling: streamIsPolling } =
-    useAgentStream(isRunning ? sessionId : null, requestId);
+  const {
+    events: agentEvents,
+    connected: streamConnected,
+    reconnecting: streamReconnecting,
+    isPolling: streamIsPolling,
+  } = useAgentStream(sessionId, requestId);
 
-  const latestIteration = iterations.length > 0 ? iterations[iterations.length - 1] : null;
+  const latestIteration =
+    iterations.length > 0 ? iterations[iterations.length - 1] : null;
   const isApproved = requestStatus === "approved";
   const isCapped = requestStatus === "needs_human_intervention";
   const feedbackDisabled = feedbackLoading || isApproved || isCapped;
@@ -270,9 +273,12 @@ export default function NlSqlInterface() {
   return (
     <section className="w-full max-w-5xl space-y-5">
       <div className="border-b border-gray-700 pb-4">
-        <h2 className="text-2xl font-semibold text-white">Natural Language to SQL</h2>
+        <h2 className="text-2xl font-semibold text-white">
+          Natural Language to SQL
+        </h2>
         <p className="mt-1 text-sm text-gray-400">
-          Datasets are preloaded from the workspace. Ask a question in plain English.
+          Datasets are preloaded from the workspace. Ask a question in plain
+          English.
         </p>
       </div>
 
@@ -293,7 +299,8 @@ export default function NlSqlInterface() {
         </div>
       ) : schemaLoaded && schemaTables.length === 0 ? (
         <div className="rounded-md border border-yellow-700 bg-yellow-950/30 p-3 text-xs text-yellow-200">
-          No tables found. Place CSV files in the project workspace and restart the backend.
+          No tables found. Place CSV files in the project workspace and restart
+          the backend.
         </div>
       ) : (
         <div className="rounded-md border border-gray-700 bg-gray-900 p-3 text-xs text-gray-400">
@@ -303,7 +310,10 @@ export default function NlSqlInterface() {
 
       <div className="grid gap-4 lg:grid-cols-[1fr_auto]">
         <div className="space-y-3">
-          <label className="text-sm font-semibold text-gray-200" htmlFor="nl-prompt">
+          <label
+            className="text-sm font-semibold text-gray-200"
+            htmlFor="nl-prompt"
+          >
             What data do you need?
           </label>
           <textarea
@@ -311,7 +321,7 @@ export default function NlSqlInterface() {
             disabled={isRunning}
             id="nl-prompt"
             onChange={(event) => setPrompt(event.target.value)}
-            placeholder="e.g. Show the first 10 rows from consolidated_fbdi"
+            placeholder="e.g. Show the first 10 rows from jde_tables"
             spellCheck={false}
             value={prompt}
           />
@@ -337,7 +347,8 @@ export default function NlSqlInterface() {
           </div>
           {dialect === "oracle" ? (
             <div className="rounded-md border border-amber-700 bg-amber-950/40 p-2 text-xs text-amber-200">
-              Oracle support is coming soon. Only PostgreSQL is available at this time.
+              Oracle support is coming soon. Only PostgreSQL is available at
+              this time.
             </div>
           ) : null}
           <button
@@ -346,7 +357,7 @@ export default function NlSqlInterface() {
             onClick={handleSubmit}
             type="button"
           >
-            {isRunning ? "Processing..." : "Generate & Run"}
+            {isRunning ? "Processing..." : "Generate SQL"}
           </button>
         </div>
       </div>
@@ -411,7 +422,7 @@ export default function NlSqlInterface() {
 function EmptyState() {
   return (
     <div className="flex min-h-48 items-center justify-center rounded-md border border-dashed border-gray-700 text-sm text-gray-500">
-      Enter a natural language question and click &quot;Generate &amp; Run&quot;
+      Enter a natural language question and click &quot;Generate SQL&quot;
     </div>
   );
 }
@@ -420,7 +431,7 @@ function RunningState() {
   return (
     <div className="flex min-h-48 flex-col items-center justify-center gap-3 rounded-md border border-gray-700 bg-gray-900 text-sm text-gray-400">
       <div className="h-8 w-8 animate-spin rounded-full border-2 border-gray-700 border-t-cyan-400" />
-      <span>Calling LLM, validating SQL, executing query...</span>
+      <span>Generating SQL query...</span>
     </div>
   );
 }
@@ -474,7 +485,6 @@ function ResultView({
   onRejectCommentChange: (comment: string) => void;
   onNewQuery: () => void;
 }) {
-  const isSuccess = result.status === "completed" || result.status === "executed";
   const isApproved = requestStatus === "approved";
   const isCapped = requestStatus === "needs_human_intervention";
 
@@ -484,21 +494,21 @@ function ResultView({
       <div className="flex items-center justify-between">
         <div>
           <div className="text-lg font-semibold text-white">
-            {isSuccess ? "Query executed" : "Execution failed"}
+            SQL Generated
           </div>
           <div className="text-xs text-gray-500">
-            Confidence: {result.confidence != null ? `${(result.confidence * 100).toFixed(0)}%` : "N/A"}
-            {result.execution_ms != null ? ` | ${result.execution_ms.toFixed(0)} ms` : ""}
-            {iterations.length > 0 ? ` | Iteration ${iterations.length} of 5` : ""}
+            Confidence:{" "}
+            {result.confidence != null
+              ? `${(result.confidence * 100).toFixed(0)}%`
+              : "N/A"}
+            {iterations.length > 0
+              ? ` | Iteration ${iterations.length} of 5`
+              : ""}
           </div>
         </div>
         <div className="flex items-center gap-2">
-          <span
-            className={`w-fit rounded px-2 py-1 text-xs font-semibold ${
-              isSuccess ? "bg-emerald-500 text-gray-950" : "bg-red-500 text-white"
-            }`}
-          >
-            {result.status}
+          <span className="w-fit rounded px-2 py-1 text-xs font-semibold bg-cyan-500 text-gray-950">
+            Generated
           </span>
           {isApproved ? (
             <span className="rounded bg-green-600 px-2 py-1 text-xs font-semibold text-white">
@@ -517,40 +527,37 @@ function ResultView({
 
       {isCapped ? (
         <div className="rounded-md border border-amber-700 bg-amber-950/40 p-3 text-sm text-amber-200">
-          Maximum iterations reached. Please edit the SQL manually or submit a new question.
+          Maximum iterations reached. Please edit the SQL manually or submit a
+          new question.
         </div>
       ) : null}
 
       {/* Source indicator */}
       {latestIteration?.is_manual_edit === true ? (
         <div className="rounded-md border border-amber-700 bg-amber-950/30 p-2 text-xs text-amber-200">
-          Manually edited SQL — executed without LLM
+          Manually edited SQL
         </div>
       ) : latestIteration ? (
         <div className="rounded-md border border-cyan-700 bg-cyan-950/20 p-2 text-xs text-cyan-200">
-          AI-generated SQL — produced by LLM
+          AI-generated SQL
         </div>
       ) : null}
 
-      {/* Query and rationale */}
-      <div className="grid gap-4 lg:grid-cols-2">
-        <Block title={latestIteration?.is_manual_edit === true ? "Edited Query SQL" : "Generated Query SQL"} language="sql" code={result.query_sql} />
-        {result.rationale ? <Block title="Rationale" code={result.rationale} /> : null}
-      </div>
-
-      {/* Execution results */}
-      {isSuccess && result.execution_results.length > 0 ? (
-        <DataTable
-          title={`Execution Results (${result.execution_rows} rows)`}
-          data={result.execution_results}
+      {/* Generated Query */}
+      <div className="space-y-4">
+        <Block
+          title={
+            latestIteration?.is_manual_edit === true
+              ? "Edited Query SQL"
+              : "Generated Query SQL"
+          }
+          language="sql"
+          code={result.query_sql}
         />
-      ) : null}
-
-      {result.error_message ? (
-        <div className="rounded-md border border-red-800 bg-red-950/40 p-3 text-xs text-red-200">
-          {result.error_message}
-        </div>
-      ) : null}
+        {result.rationale ? (
+          <Block title="Rationale" code={result.rationale} />
+        ) : null}
+      </div>
 
       {/* Feedback controls */}
       {!isApproved && !isCapped && latestIteration ? (
@@ -573,7 +580,9 @@ function ResultView({
       ) : null}
 
       {/* Iteration history */}
-      {iterations.length > 1 ? <IterationHistory iterations={iterations} /> : null}
+      {iterations.length > 1 ? (
+        <IterationHistory iterations={iterations} />
+      ) : null}
 
       <DebateSection result={result} latestIteration={latestIteration} />
 
@@ -591,10 +600,19 @@ function ResultView({
   );
 }
 
-function DebateSection({ result, latestIteration }: { result: CreateNLResponse; latestIteration: IterationDetail | null }) {
+function DebateSection({
+  result,
+  latestIteration,
+}: {
+  result: CreateNLResponse;
+  latestIteration: IterationDetail | null;
+}) {
   const [expanded, setExpanded] = useState(false);
 
-  const transcript = result.debate_transcript_json ?? latestIteration?.debate_transcript_json ?? null;
+  const transcript =
+    result.debate_transcript_json ??
+    latestIteration?.debate_transcript_json ??
+    null;
 
   if (!transcript) return null;
 
@@ -606,7 +624,9 @@ function DebateSection({ result, latestIteration }: { result: CreateNLResponse; 
         type="button"
       >
         <span>Show Debate</span>
-        <span className="text-xs text-indigo-400">{expanded ? "Hide" : "Show"}</span>
+        <span className="text-xs text-indigo-400">
+          {expanded ? "Hide" : "Show"}
+        </span>
       </button>
       {expanded ? (
         <DebateView transcript={transcript as unknown as DebateTranscriptUI} />
@@ -614,7 +634,6 @@ function DebateSection({ result, latestIteration }: { result: CreateNLResponse; 
     </div>
   );
 }
-
 
 function FeedbackControls({
   feedbackLoading,
@@ -649,7 +668,9 @@ function FeedbackControls({
 }) {
   return (
     <div className="space-y-3 rounded-md border border-gray-700 bg-gray-950 p-4">
-      <div className="text-xs font-semibold uppercase text-gray-500">Feedback</div>
+      <div className="text-xs font-semibold uppercase text-gray-500">
+        Feedback
+      </div>
 
       {/* Action buttons */}
       <div className="flex flex-wrap gap-2">
@@ -724,7 +745,7 @@ function FeedbackControls({
             onClick={onEdit}
             type="button"
           >
-            {feedbackLoading ? "Running..." : "Run Edited SQL"}
+            {feedbackLoading ? "Processing..." : "Save Edited SQL"}
           </button>
         </div>
       ) : null}
@@ -739,7 +760,11 @@ function FeedbackControls({
       {feedbackLoading ? (
         <div className="flex items-center gap-2 text-xs text-gray-400">
           <div className="h-4 w-4 animate-spin rounded-full border-2 border-gray-700 border-t-cyan-400" />
-          {rejectMode && !editMode ? "Regenerating SQL with feedback context..." : editMode && !rejectMode ? "Validating and executing edited SQL..." : "Processing feedback..."}
+          {rejectMode && !editMode
+            ? "Regenerating SQL with feedback context..."
+            : editMode && !rejectMode
+              ? "Validating edited SQL..."
+              : "Processing feedback..."}
         </div>
       ) : null}
     </div>
@@ -757,7 +782,9 @@ function IterationHistory({ iterations }: { iterations: IterationDetail[] }) {
         type="button"
       >
         <span>Iteration History ({iterations.length} attempts)</span>
-        <span className="text-xs text-gray-500">{expanded ? "Hide" : "Show"}</span>
+        <span className="text-xs text-gray-500">
+          {expanded ? "Hide" : "Show"}
+        </span>
       </button>
 
       {expanded ? (
@@ -812,19 +839,19 @@ function IterationHistory({ iterations }: { iterations: IterationDetail[] }) {
                   {it.confidence != null ? (
                     <span>Confidence: {(it.confidence * 100).toFixed(0)}%</span>
                   ) : null}
-                  {it.execution_rows != null ? <span>Rows: {it.execution_rows}</span> : null}
-                  {it.execution_ms != null ? (
-                    <span>Time: {it.execution_ms.toFixed(0)}ms</span>
-                  ) : null}
                 </div>
 
                 {it.rationale ? (
-                  <div className="mt-1 text-gray-500 italic">{it.rationale}</div>
+                  <div className="mt-1 text-gray-500 italic">
+                    {it.rationale}
+                  </div>
                 ) : null}
 
                 {it.feedback_comment ? (
                   <div className="mt-1 rounded border border-gray-700 bg-gray-900 p-2 text-gray-300">
-                    <span className="font-semibold text-gray-400">Feedback: </span>
+                    <span className="font-semibold text-gray-400">
+                      Feedback:{" "}
+                    </span>
                     {it.feedback_comment}
                   </div>
                 ) : null}
@@ -846,15 +873,18 @@ function IterationHistory({ iterations }: { iterations: IterationDetail[] }) {
 
 function StatusBadge({ status }: { status: string }) {
   const colors: Record<string, string> = {
-    executed: "bg-emerald-600 text-white",
     approved: "bg-green-600 text-white",
+    validated: "bg-blue-600 text-white",
     failed: "bg-red-600 text-white",
     pending: "bg-yellow-600 text-gray-950",
     superseded: "bg-gray-600 text-gray-300",
-    validated: "bg-blue-600 text-white",
   };
   const color = colors[status] || "bg-gray-600 text-gray-300";
-  return <span className={`rounded px-1.5 py-0.5 font-semibold ${color}`}>{status}</span>;
+  return (
+    <span className={`rounded px-1.5 py-0.5 font-semibold ${color}`}>
+      {status}
+    </span>
+  );
 }
 
 function Block({
@@ -868,51 +898,12 @@ function Block({
 }) {
   return (
     <div className="rounded-md border border-gray-700 bg-gray-950 p-3">
-      <div className="mb-2 text-xs font-semibold uppercase text-gray-500">{title}</div>
+      <div className="mb-2 text-xs font-semibold uppercase text-gray-500">
+        {title}
+      </div>
       <pre className="max-h-48 overflow-auto whitespace-pre-wrap break-words rounded bg-gray-800 p-2 font-mono text-xs text-gray-200">
         {code}
       </pre>
-    </div>
-  );
-}
-
-function DataTable({
-  title,
-  data,
-}: {
-  title: string;
-  data: Record<string, unknown>[];
-}) {
-  if (data.length === 0) return null;
-  const columns = Object.keys(data[0]);
-
-  return (
-    <div className="rounded-md border border-gray-700 bg-gray-950 p-3">
-      <div className="mb-2 text-xs font-semibold uppercase text-gray-500">{title}</div>
-      <div className="max-h-72 overflow-auto">
-        <table className="w-full border-collapse text-xs">
-          <thead>
-            <tr className="border-b border-gray-700">
-              {columns.map((col) => (
-                <th key={col} className="px-2 py-1 text-left font-semibold text-gray-400">
-                  {col}
-                </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {data.map((row, i) => (
-              <tr key={i} className="border-b border-gray-800">
-                {columns.map((col) => (
-                  <td key={col} className="px-2 py-1 text-gray-300">
-                    {String(row[col] ?? "NULL")}
-                  </td>
-                ))}
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
     </div>
   );
 }
